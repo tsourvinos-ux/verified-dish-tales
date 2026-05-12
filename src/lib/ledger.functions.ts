@@ -1,10 +1,10 @@
 import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import { z } from "zod";
 import {
   reviewSchema,
   ownerResponseSchema,
   redeemRewardSchema,
-  mintRewardSchema,
 } from "./schemas";
 
 // @business-logic: Submits a patron review. Immutable once written (no UPDATE/DELETE policies).
@@ -76,38 +76,19 @@ export const redeemReward = createServerFn({ method: "POST" })
     return rows[0];
   });
 
-// @business-logic: Admin-only reward minting (provisions a patron a reward by email).
-export const mintReward = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
-  .inputValidator((input: unknown) => mintRewardSchema.parse(input))
-  .handler(async ({ data, context }) => {
-    const { supabase, userId } = context;
-    const { data: isAdmin } = await supabase.rpc("has_role", {
-      _user_id: userId,
-      _role: "admin",
-    });
-    if (!isAdmin) throw new Error("Admin only.");
-
-    // Look up target user by email via admin API would need service role; we use profiles.display_name fallback.
-    // For demo we accept user_email and resolve via profiles seeded display_name. In production this would
-    // call an admin edge function. Here we expect admin to pass an existing user UUID via a query—simplified:
-    throw new Error("Use the admin panel reward composer (UUID-based) to mint rewards.");
-  });
-
 // @business-logic: Admin-only reward minting by patron user id.
 export const mintRewardForUser = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((input: unknown) => {
-    const { z } = require("zod") as typeof import("zod");
-    return z
+  .inputValidator((input: unknown) =>
+    z
       .object({
         user_id: z.string().uuid(),
         business_id: z.string().uuid(),
         title: z.string().min(3).max(80),
         expiry_days: z.number().int().min(1).max(365),
       })
-      .parse(input);
-  })
+      .parse(input)
+  )
   .handler(async ({ data, context }) => {
     const { supabase, userId } = context;
     const { data: isAdmin } = await supabase.rpc("has_role", {
