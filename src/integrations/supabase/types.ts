@@ -79,6 +79,36 @@ export type Database = {
         }
         Relationships: []
       }
+      moderation_flags: {
+        Row: {
+          auto: boolean
+          created_at: string
+          id: string
+          reason: string
+          severity: string
+          target_id: string
+          target_table: string
+        }
+        Insert: {
+          auto?: boolean
+          created_at?: string
+          id?: string
+          reason: string
+          severity: string
+          target_id: string
+          target_table: string
+        }
+        Update: {
+          auto?: boolean
+          created_at?: string
+          id?: string
+          reason?: string
+          severity?: string
+          target_id?: string
+          target_table?: string
+        }
+        Relationships: []
+      }
       owner_responses: {
         Row: {
           author_id: string
@@ -86,6 +116,8 @@ export type Database = {
           content: string
           created_at: string
           id: string
+          is_visible: boolean
+          moderation_reason: string | null
           review_id: string
         }
         Insert: {
@@ -94,6 +126,8 @@ export type Database = {
           content: string
           created_at?: string
           id?: string
+          is_visible?: boolean
+          moderation_reason?: string | null
           review_id: string
         }
         Update: {
@@ -102,6 +136,8 @@ export type Database = {
           content?: string
           created_at?: string
           id?: string
+          is_visible?: boolean
+          moderation_reason?: string | null
           review_id?: string
         }
         Relationships: [
@@ -148,6 +184,8 @@ export type Database = {
           content: string
           created_at: string
           id: string
+          is_visible: boolean
+          moderation_reason: string | null
           rating: number
           user_id: string
         }
@@ -156,6 +194,8 @@ export type Database = {
           content: string
           created_at?: string
           id?: string
+          is_visible?: boolean
+          moderation_reason?: string | null
           rating: number
           user_id: string
         }
@@ -164,6 +204,8 @@ export type Database = {
           content?: string
           created_at?: string
           id?: string
+          is_visible?: boolean
+          moderation_reason?: string | null
           rating?: number
           user_id?: string
         }
