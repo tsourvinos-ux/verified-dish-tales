@@ -8,7 +8,7 @@ const bodySchema = z.object({
   limit: z.number().int().min(5).max(40).optional().default(15),
 });
 
-function sanitizeForPrompt(s: string, max: number): string {
+export function sanitizeForPrompt(s: string, max: number): string {
   return s
     .replace(/[<>`]/g, "")
     // strip control chars (incl. newlines) so injected "\nSYSTEM:" blocks flatten to one line
