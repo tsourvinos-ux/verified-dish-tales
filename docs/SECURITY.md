@@ -82,10 +82,11 @@ Each layer assumes the layer above is hostile.
 
 ## Known gaps
 
-- **No request-level rate limiting** on `/api/summarize`. The platform does not yet expose rate-limiting primitives. Cost-amplification risk is mitigated by:
+- **Rate limiting on `/api/summarize` is best-effort.** A per-user in-memory token bucket (10 requests / 10 min, keyed by `claims.sub`) sheds excess traffic with a `429` + `Retry-After`. Because state lives in a single Worker isolate it is **not** a hard distributed limit — concurrent isolates each enforce their own bucket. Combined defences:
   1. Auth required (`Bearer <jwt>`) — anonymous traffic is rejected.
-  2. `limit` clamped to 5–40 reviews per request via Zod.
-  3. Server-side LRU cache (5-min TTL, key includes review count + latest `created_at`) — repeated summaries for the same business are served from memory.
-  4. `Cache-Control: private, max-age=60` so browsers/clients also reuse responses.
+  2. Per-user token bucket as above.
+  3. `limit` clamped to 5–40 reviews per request via Zod.
+  4. Server-side LRU cache (5-min TTL, key includes review count + latest `created_at`) — repeated summaries for the same business are served from memory.
+  5. `Cache-Control: private, max-age=60` so browsers/clients also reuse responses.
 
-  Proper per-user / per-IP rate limiting will be added when the platform supports it.
+  A platform-level distributed limiter will replace this when available.
