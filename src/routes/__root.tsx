@@ -11,6 +11,18 @@ import {
 import appCss from "../styles.css?url";
 import { AuthProvider } from "@/hooks/use-auth";
 import { Toaster } from "@/components/ui/sonner";
+import { useEffect } from "react";
+import { initSentryClient, captureClientException } from "@/lib/sentry.client";
+import { createServerFn } from "@tanstack/react-start";
+
+// Server-side handoff for the public Sentry DSN. The DSN is browser-safe
+// (it identifies the project, not authenticates writes), but we still avoid
+// hardcoding it so rotation only requires updating the secret.
+const getClientConfig = createServerFn({ method: "GET" }).handler(async () => {
+  return {
+    sentryDsn: process.env.SENTRY_DSN ?? null,
+  };
+});
 
 function NotFoundComponent() {
   return (
@@ -37,6 +49,9 @@ function NotFoundComponent() {
 function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
   console.error(error);
   const router = useRouter();
+  useEffect(() => {
+    captureClientException(error, { boundary: "root" });
+  }, [error]);
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
@@ -70,6 +85,7 @@ function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
 }
 
 export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()({
+  loader: async () => getClientConfig(),
   head: () => ({
     meta: [
       { charSet: "utf-8" },
@@ -109,10 +125,18 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
 });
 
 function RootShell({ children }: { children: React.ReactNode }) {
+  const data = Route.useLoaderData();
   return (
     <html lang="en">
       <head>
         <HeadContent />
+        {data?.sentryDsn && (
+          <script
+            dangerouslySetInnerHTML={{
+              __html: `window.__SENTRY_DSN__=${JSON.stringify(data.sentryDsn)};`,
+            }}
+          />
+        )}
       </head>
       <body>
         {children}
@@ -124,6 +148,9 @@ function RootShell({ children }: { children: React.ReactNode }) {
 
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
+  useEffect(() => {
+    initSentryClient();
+  }, []);
 
   return (
     <QueryClientProvider client={queryClient}>
