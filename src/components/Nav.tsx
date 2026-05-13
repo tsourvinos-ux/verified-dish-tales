@@ -20,6 +20,9 @@ export function Nav() {
             <Link to="/account" className="text-forest" activeProps={{ className: "text-clay" }}>
               Wallet
             </Link>
+            <Link to="/account/security" className="text-forest/70 hidden sm:inline" activeProps={{ className: "text-clay" }}>
+              Security
+            </Link>
             {isAdmin && (
               <>
                 <Link to="/admin" className="text-clay" activeProps={{ className: "underline underline-offset-4" }}>

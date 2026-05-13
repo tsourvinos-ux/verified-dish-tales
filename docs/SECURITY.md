@@ -84,11 +84,38 @@ Each layer assumes the layer above is hostile.
 
 ## Known gaps
 
-- **Rate limiting on `/api/summarize` is best-effort.** A per-user in-memory token bucket (10 requests / 10 min, keyed by `claims.sub`) sheds excess traffic with a `429` + `Retry-After`. Because state lives in a single Worker isolate it is **not** a hard distributed limit — concurrent isolates each enforce their own bucket. Combined defences:
-  1. Auth required (`Bearer <jwt>`) — anonymous traffic is rejected.
-  2. Per-user token bucket as above.
-  3. `limit` clamped to 5–40 reviews per request via Zod.
-  4. Server-side LRU cache (5-min TTL, key includes review count + latest `created_at`) — repeated summaries for the same business are served from memory.
-  5. `Cache-Control: private, max-age=60` so browsers/clients also reuse responses.
+## Rate limiting (resolved)
 
-  A platform-level distributed limiter will replace this when available.
+Distributed rate limiting now backed by Upstash Redis (sliding fixed window via
+REST pipeline). Two surfaces, three keys:
+
+| Surface | Key prefix | Limit | Window |
+|---|---|---|---|
+| `/api/summarize` (per user) | `rl:summarize:<uid>` | 10 | 10 min |
+| `/api/summarize` (per IP) | `rl:summarize:ip:<ip>` | 60 | 10 min |
+| `submitReview` (per user) | `rl:review:<uid>` | 10 | 1 hr |
+| `submitOwnerResponse` (per business) | `rl:resp:biz:<bid>` | 30 | 1 hr |
+
+IP is read from `CF-Connecting-IP` (Cloudflare) → first `X-Forwarded-For` →
+`unknown`. All checks **fail open** on Upstash unavailability — rate-limit is
+a cost guardrail, not a security boundary, so request availability beats limit
+precision. See `src/integrations/upstash/ratelimit.server.ts`.
+
+## Auth hardening
+
+- **Email confirmation** required (Supabase default; do not disable).
+- **HIBP password check** enabled via `password_hibp_enabled`.
+- **MFA (TOTP)** available at `/account/security`. Soft-enforced for admin and
+  restaurateur via a banner; hard-block deferred to avoid lockout during rollout.
+- **CAPTCHA** (Cloudflare Turnstile) on signup. Activates when
+  `VITE_TURNSTILE_SITE_KEY` is set; verified server-side via `verifyCaptcha`
+  server fn before `supabase.auth.signUp` is called.
+
+## Moderation
+
+Pre-write AI moderation (`google/gemini-2.5-flash-lite`):
+
+- `severity: "high"` → write rejected with user-facing message.
+- `severity: "low"` → row inserted with `is_visible=false` + `moderation_flags` audit row.
+- AI failure → fail open, insert visible, queue an auto-flag for admin review.
+- Admin override at `/admin/moderation` toggles `is_visible` only — content stays immutable.
