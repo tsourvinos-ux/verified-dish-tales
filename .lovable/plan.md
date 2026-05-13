@@ -1,67 +1,51 @@
-# Close audit gaps (docs + PWA install + streaming polish)
+## Plan: Performance & Security Hardening
 
-The audit conflates "not present in repo" with "not implemented." Migrations, RLS, CHECK constraints, the immutability trigger, Zod validation, and SSE streaming all exist. The genuine gaps are documentation, an install manifest, and verifying the streaming UI.
+Address 7 of 8 reported issues. Skipping #8 (rate limiting) — backend has no rate-limiting primitives yet (platform policy); will note in README instead.
 
-## 1. Documentation
+### 1. Summary endpoint efficiency (`src/routes/api/summarize.ts`)
+- Accept optional `limit` in body (Zod `number().int().min(5).max(40).default(15)`); default lowered from 40 → 15.
+- Add server-side in-memory LRU cache keyed by `business_id + reviewCount + latestReviewCreatedAt` with 5-min TTL. First fetch `count` + latest `created_at` cheaply, return cached stream replay if hit.
+- Add `Cache-Control: private, max-age=60` header on the streamed response.
 
-**`README.md`** (root)
-- Product mission + objectives (verbatim from project knowledge)
-- Architecture overview: TanStack Start + Lovable Cloud (Supabase), `createServerFn` as the server layer, no Edge Functions by design
-- Personas + access model (admin / restaurateur / patron, `has_role()` + `is_business_member()`)
-- Local dev / build commands
-- **Audit reconciliation** section: explicitly maps each "missing" claim to the file/policy that already implements it (migrations paths, RLS policy names, the `prevent_used_at_overwrite` trigger, `src/routes/api/summarize.ts` for streaming, why Edge Functions are intentionally absent)
+### 2. DB indexes (new migration)
+```sql
+CREATE INDEX IF NOT EXISTS idx_user_roles_lookup
+  ON public.user_roles(user_id, role);
+CREATE INDEX IF NOT EXISTS idx_business_membership_lookup
+  ON public.business_profile_membership(user_id, business_id);
+CREATE INDEX IF NOT EXISTS idx_reviews_user
+  ON public.reviews(user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_responses_author
+  ON public.owner_responses(author_id);
+CREATE INDEX IF NOT EXISTS idx_rewards_business
+  ON public.verified_rewards(business_id, expiry_date DESC);
+```
 
-**`.lovable/instructions.md`** — persistent AI directives
-- Security: no `service_role` in client; all writes go through `createServerFn` with `requireSupabaseAuth`; Zod-validated; RLS-scoped by `auth.uid()`
-- Architecture: strict TS, no `any`; three-state pattern (Loading skeleton / Authorized / `AccessDenied`); `// @business-logic` and `// @complexity-explanation` tags
-- UI: streaming token-by-token for AI; Stop button; mobile-first chat bubbles (right=patron/forest, left=owner/muted)
-- Immutability invariants: reviews/owner_responses are append-only; `used_at` flips once
+### 3 & 4 & 6. Auth hook hardening (`src/hooks/use-auth.tsx`)
+- Replace `setTimeout(..., 0)` with `queueMicrotask` (still defers past the auth callback so the JWT is attached, but no 16ms macrotask delay).
+- Switch `Promise.all` → `Promise.allSettled`; on rejection keep previous state and `console.error`; never silently null-out roles.
+- Wrap `loadProfile` in `useCallback`; gate re-fetch by `userId` change only (already effectively the case, but make explicit).
+- Add a 5-minute in-memory cache (`Map<userId, { roles, memberships, fetchedAt }>`) so remounts of `AuthProvider` (HMR, route transitions) don't refire two queries.
+- Note: not migrating to `react-query` for auth — `AuthProvider` is a singleton context and the cache above gives us SWR semantics without restructuring the provider tree. (TanStack Query stays for route-level data.)
+- NOT reading roles from `user_metadata`: roles live in `user_roles` table per the security model (`user_metadata` is user-writable and would be a privilege-escalation vector). Keep DB lookup; index from #2 makes it a single index hit.
 
-**`docs/SECURITY.md`** — security model reference
-- Table-by-table RLS matrix (who can SELECT/INSERT/UPDATE/DELETE and under what predicate)
-- Database-level guarantees: CHECK constraints (rating 1–5, content length 10–1000 / 10–500), UNIQUE one-response-per-review, `prevent_used_at_overwrite` trigger
-- Validation pipeline: Zod sanitize → server fn → RLS → trigger
-- `/api/summarize` auth + prompt-injection mitigations (server-fetched content, sanitization)
-- Validation checklist (the four bullets from the project knowledge)
+### 5. Already covered by #2.
 
-**`CHANGELOG.md`**
-- `v1.0.0 — Verified Rewards & Immutable Ledger` pinning current behaviour
+### 7. Prompt-injection hardening (`src/routes/api/summarize.ts`)
+- Extend `sanitizeForPrompt` to also strip newlines/CR/tabs (already collapses `\s+` — confirm and tighten: replace ALL control chars `[\x00-\x1F\x7F]`).
+- Wrap each review's content with `JSON.stringify` so quotes/backslashes are escaped and the model sees a clearly delimited string literal.
+- Add explicit fence: each review on its own line as `Review N (R/5): <json-string>`, plus a trailing system reminder line.
 
-## 2. PWA install (manifest only, no service worker)
+### 8. Rate limiting — SKIP
+Per platform policy, the backend lacks rate-limiting primitives. Document in `docs/SECURITY.md` under "Known gaps" that `/api/summarize` cost amplification is mitigated by (a) auth requirement, (b) `limit` cap of 40, (c) cache, and that proper rate limiting is deferred until platform support lands.
 
-Per platform guidance, service workers break the Lovable preview iframe. Install-only manifest is enough for "Add to Home Screen."
+### Files touched
+- `supabase/migrations/<new>.sql` (indexes)
+- `src/routes/api/summarize.ts` (limit param, cache, sanitization, JSON-encoded reviews)
+- `src/hooks/use-auth.tsx` (queueMicrotask, allSettled, useCallback, in-memory cache)
+- `docs/SECURITY.md` (known-gaps note)
 
-- `public/manifest.webmanifest` — name "TasteLedger", short_name, `display: "standalone"`, `start_url: "/"`, `theme_color`/`background_color` from forest/cream tokens, icons array
-- `public/icon-192.png`, `public/icon-512.png` — generate via imagegen (cream background, forest "TL" monogram in serif)
-- `<link rel="manifest" href="/manifest.webmanifest">` + `theme-color` meta in `src/routes/__root.tsx` head
-- `<link rel="apple-touch-icon">` for iOS home-screen
-- Small "Install on your phone" hint card on `/account` (no JS install prompt — keep simple)
-
-No service worker, no `vite-plugin-pwa`, no offline cache.
-
-## 3. Streaming UI verification
-
-Audit `src/routes/restaurants.$slug.tsx` `AISummaryPanel`:
-- Confirm SSE chunks append to state on each `data:` event (not buffered until completion)
-- Confirm Stop button calls `controller.abort()` and resets state cleanly
-- Add a subtle pulsing cursor `▍` at the end of the streaming text while `isStreaming` is true
-- If buffering is found, switch to per-chunk `setSummary(prev => prev + delta)`
-
-## 4. Out of scope (explicitly)
-
-- Supabase Edge Functions — TanStack Start uses `createServerFn`; duplicating is anti-pattern per framework docs
-- Service worker / offline cache — breaks preview, ships stale shells to installed PWAs
-- New migrations — current schema satisfies all stated invariants
-- CI/CD workflows — Lovable handles build/deploy; `.github/workflows` is not the right surface here
-
-## Files touched
-
-- `README.md` (new)
-- `.lovable/instructions.md` (new)
-- `docs/SECURITY.md` (new)
-- `CHANGELOG.md` (new)
-- `public/manifest.webmanifest` (new)
-- `public/icon-192.png`, `public/icon-512.png` (new, generated)
-- `src/routes/__root.tsx` (head links)
-- `src/routes/account.tsx` (install hint card)
-- `src/routes/restaurants.$slug.tsx` (streaming UI polish if needed)
+### Out of scope
+- Migrating auth to TanStack Query (large refactor, no functional gain over the cache).
+- Reading roles from JWT claims (security regression).
+- Rate limiting (platform gap).
