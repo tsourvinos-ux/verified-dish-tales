@@ -1,0 +1,24 @@
+name: Security audit
+
+on:
+  schedule:
+    - cron: "13 6 * * 1"
+  pull_request:
+    paths:
+      - "package.json"
+      - "bun.lock"
+      - ".github/workflows/audit.yml"
+  workflow_dispatch:
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - name: bun install (frozen)
+        run: bun install --frozen-lockfile
+      - name: bun audit (high+)
+        run: bun audit --audit-level=high
