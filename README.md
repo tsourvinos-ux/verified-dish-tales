@@ -88,6 +88,8 @@ The repo has been audited externally; several "missing" claims were inaccurate. 
 | "No security documentation" | `docs/SECURITY.md` |
 | "No version pinning" | `CHANGELOG.md` (`v1.0.0` — Verified Rewards & Immutable Ledger) |
 
+_Audit dated 2026-05-13 reconciled — `any` types now ESLint-blocked (`@typescript-eslint/no-explicit-any: error`); generated `src/routeTree.gen.ts` ignored. Service-worker-based offline support remains intentionally omitted; see PWA row above._
+
 ## Security
 
 See [`docs/SECURITY.md`](./docs/SECURITY.md) for the full RLS matrix, validation pipeline, and threat model.

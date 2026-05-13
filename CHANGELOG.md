@@ -4,6 +4,14 @@ All notable changes to this project are documented here. This project follows [S
 
 ## [1.0.0] — Verified Rewards & Immutable Ledger
 
+## [1.0.1] — Lint guard + audit reconciliation
+
+### Added
+
+- ESLint rule `@typescript-eslint/no-explicit-any: error` to enforce the "no `any`" architectural directive at lint time. Generated `src/routeTree.gen.ts` is ignored.
+- README "Audit reconciliation" footnote dated 2026-05-13.
+
+
 First pinned release. Use this tag as a clean rollback point before introducing breaking changes.
 
 ### Added
