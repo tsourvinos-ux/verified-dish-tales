@@ -12,7 +12,7 @@ import appCss from "../styles.css?url";
 import { AuthProvider } from "@/hooks/use-auth";
 import { Toaster } from "@/components/ui/sonner";
 import { useEffect } from "react";
-import { initSentryClient, captureClientException } from "@/lib/sentry.client";
+import { initSentryClient, captureClientException } from "@/lib/sentry.browser";
 import { createServerFn } from "@tanstack/react-start";
 
 // Server-side handoff for the public Sentry DSN. The DSN is browser-safe
