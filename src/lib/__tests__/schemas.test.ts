@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { reviewSchema, ownerResponseSchema } from "../schemas";
 
-const UUID = "11111111-1111-1111-1111-111111111111";
+const UUID = "11111111-1111-4111-8111-111111111111";
 
 describe("reviewSchema", () => {
   it("accepts a clean 10-char review", () => {
