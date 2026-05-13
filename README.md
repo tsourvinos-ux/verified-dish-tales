@@ -90,9 +90,42 @@ The repo has been audited externally; several "missing" claims were inaccurate. 
 
 _Audit dated 2026-05-13 reconciled — `any` types now ESLint-blocked (`@typescript-eslint/no-explicit-any: error`); generated `src/routeTree.gen.ts` ignored. Service-worker-based offline support remains intentionally omitted; see PWA row above._
 
+_Update 2026-05-13: per-user rate limiting added to `/api/summarize` (best-effort, in-memory; see [`docs/SECURITY.md`](./docs/SECURITY.md) "Known gaps"). Offline / service-worker decision is now codified in [`docs/ADR-001-no-service-worker.md`](./docs/ADR-001-no-service-worker.md)._
+
 ## Security
 
 See [`docs/SECURITY.md`](./docs/SECURITY.md) for the full RLS matrix, validation pipeline, and threat model.
+
+## Testing
+
+```bash
+bun run test
+```
+
+Vitest covers the highest-leverage pure logic:
+
+- `src/lib/__tests__/schemas.test.ts` — Zod bounds + XSS/control-char sanitisation for reviews and owner responses.
+- `src/routes/api/__tests__/summarize-sanitize.test.ts` — prompt-injection neutralisation in `sanitizeForPrompt`.
+
+Out of scope for v1: RLS integration tests (require a disposable Postgres), end-to-end browser tests. RLS guarantees are exercised manually via the load-test script below.
+
+## Load testing
+
+Manual scripts in `scripts/loadtest.ts` exercise the two production-critical hot paths:
+
+- **`summarize`** — concurrent `/api/summarize` calls; reports p50/p95/p99 latency, cache HIT/MISS via `X-Summary-Cache`, 429 count.
+- **`redeem`** — N concurrent attempts on the same `reward_id`; expects exactly **one** success and N-1 "already redeemed" responses (validates the atomic UPDATE + `prevent_used_at_overwrite` trigger).
+
+```bash
+export LOADTEST_BASE_URL=https://lodger.lovable.app
+export LOADTEST_BEARER=<copy a valid Supabase JWT from devtools>
+export LOADTEST_BUSINESS_ID=<uuid>
+export LOADTEST_REWARD_ID=<uuid>
+export LOADTEST_CONCURRENCY=20
+
+bunx tsx scripts/loadtest.ts summarize
+bunx tsx scripts/loadtest.ts redeem
+```
 
 ## Versioning
 
