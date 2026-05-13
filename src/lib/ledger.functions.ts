@@ -7,6 +7,13 @@ import {
   redeemRewardSchema,
 } from "./schemas";
 import { moderateContent } from "./moderation.server";
+import { checkRateLimit } from "@/integrations/upstash/ratelimit.server";
+
+// @business-logic: per-user write caps. Cheap defence against scripted abuse;
+// fail-open on Upstash error so user-facing writes never break on infra hiccups.
+const REVIEW_LIMIT_PER_HOUR = 10;
+const RESPONSE_LIMIT_PER_BIZ_PER_HOUR = 30;
+const HOUR_SEC = 3600;
 
 // @business-logic: Submits a patron review. Immutable once written (no UPDATE/DELETE policies).
 export const submitReview = createServerFn({ method: "POST" })
@@ -14,6 +21,16 @@ export const submitReview = createServerFn({ method: "POST" })
   .inputValidator((input: unknown) => reviewSchema.parse(input))
   .handler(async ({ data, context }) => {
     const { supabase, userId } = context;
+    const rl = await checkRateLimit({
+      key: `rl:review:${userId}`,
+      limit: REVIEW_LIMIT_PER_HOUR,
+      windowSec: HOUR_SEC,
+    });
+    if (!rl.ok) {
+      throw new Error(
+        `Slow down — you can post up to ${REVIEW_LIMIT_PER_HOUR} reviews per hour.`,
+      );
+    }
     // @business-logic: Pre-write moderation. "high" rejects, "low" inserts hidden.
     const verdict = await moderateContent(data.content);
     if (!verdict.allow) {
@@ -63,6 +80,16 @@ export const submitOwnerResponse = createServerFn({ method: "POST" })
   .inputValidator((input: unknown) => ownerResponseSchema.parse(input))
   .handler(async ({ data, context }) => {
     const { supabase, userId } = context;
+    const rl = await checkRateLimit({
+      key: `rl:resp:biz:${data.business_id}`,
+      limit: RESPONSE_LIMIT_PER_BIZ_PER_HOUR,
+      windowSec: HOUR_SEC,
+    });
+    if (!rl.ok) {
+      throw new Error(
+        `Response limit reached for this business (${RESPONSE_LIMIT_PER_BIZ_PER_HOUR}/hr).`,
+      );
+    }
     const verdict = await moderateContent(data.content);
     if (!verdict.allow) {
       throw new Error(verdict.reason ?? "This response can't be published.");
