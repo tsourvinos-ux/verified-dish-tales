@@ -95,6 +95,17 @@ export const Route = createFileRoute("/api/summarize")({
           return new Response("Unauthorized", { status: 401 });
         }
 
+        const rl = rateLimitTake(String(claims.claims.sub));
+        if (!rl.ok) {
+          return new Response("Rate limit exceeded. Try again later.", {
+            status: 429,
+            headers: {
+              "Retry-After": String(rl.retryAfterSec),
+              "Content-Type": "text/plain; charset=utf-8",
+            },
+          });
+        }
+
         let body: unknown;
         try {
           body = await request.json();
