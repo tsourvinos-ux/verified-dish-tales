@@ -1,5 +1,8 @@
 # TasteLedger — Verified Restaurant Review Ledger
 
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](./LICENSE)
+[![Live demo](https://img.shields.io/badge/demo-lodger.lovable.app-1f3a2e)](https://lodger.lovable.app)
+
 A zero-trust, mobile-first ledger for verifiable dining interactions: immutable patron reviews, immutable owner responses, and single-use Verified Rewards.
 
 ## Mission
@@ -53,6 +56,10 @@ Authorisation helpers (security-definer):
 bun install
 bun run dev
 ```
+
+`bun` is the primary toolchain. `npm install && npm run dev` also works for evaluators
+who don't want to install Bun — `package.json` declares `engines: { bun: ">=1.1", node: ">=20" }`
+and every script is `vite`/`vitest`-based, so npm/pnpm/yarn run them too.
 
 Environment is auto-provisioned by Lovable Cloud (`.env` is generated, do not edit).
 
@@ -130,3 +137,8 @@ bunx tsx scripts/loadtest.ts redeem
 ## Versioning
 
 See [`CHANGELOG.md`](./CHANGELOG.md). v1.0.0 is the pinned baseline.
+
+## License
+
+[AGPL-3.0-or-later](./LICENSE). Network-use triggers source disclosure — if you run a
+modified version as a service, you must publish the modified source.

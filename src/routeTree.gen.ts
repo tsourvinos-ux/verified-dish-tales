@@ -16,6 +16,7 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as RestaurantsSlugRouteImport } from './routes/restaurants.$slug'
 import { Route as ApiSummarizeRouteImport } from './routes/api/summarize'
 import { Route as AdminModerationRouteImport } from './routes/admin.moderation'
+import { Route as AccountSecurityRouteImport } from './routes/account.security'
 
 const LoginRoute = LoginRouteImport.update({
   id: '/login',
@@ -52,21 +53,28 @@ const AdminModerationRoute = AdminModerationRouteImport.update({
   path: '/moderation',
   getParentRoute: () => AdminRoute,
 } as any)
+const AccountSecurityRoute = AccountSecurityRouteImport.update({
+  id: '/security',
+  path: '/security',
+  getParentRoute: () => AccountRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
-  '/account': typeof AccountRoute
+  '/account': typeof AccountRouteWithChildren
   '/admin': typeof AdminRouteWithChildren
   '/login': typeof LoginRoute
+  '/account/security': typeof AccountSecurityRoute
   '/admin/moderation': typeof AdminModerationRoute
   '/api/summarize': typeof ApiSummarizeRoute
   '/restaurants/$slug': typeof RestaurantsSlugRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
-  '/account': typeof AccountRoute
+  '/account': typeof AccountRouteWithChildren
   '/admin': typeof AdminRouteWithChildren
   '/login': typeof LoginRoute
+  '/account/security': typeof AccountSecurityRoute
   '/admin/moderation': typeof AdminModerationRoute
   '/api/summarize': typeof ApiSummarizeRoute
   '/restaurants/$slug': typeof RestaurantsSlugRoute
@@ -74,9 +82,10 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
-  '/account': typeof AccountRoute
+  '/account': typeof AccountRouteWithChildren
   '/admin': typeof AdminRouteWithChildren
   '/login': typeof LoginRoute
+  '/account/security': typeof AccountSecurityRoute
   '/admin/moderation': typeof AdminModerationRoute
   '/api/summarize': typeof ApiSummarizeRoute
   '/restaurants/$slug': typeof RestaurantsSlugRoute
@@ -88,6 +97,7 @@ export interface FileRouteTypes {
     | '/account'
     | '/admin'
     | '/login'
+    | '/account/security'
     | '/admin/moderation'
     | '/api/summarize'
     | '/restaurants/$slug'
@@ -97,6 +107,7 @@ export interface FileRouteTypes {
     | '/account'
     | '/admin'
     | '/login'
+    | '/account/security'
     | '/admin/moderation'
     | '/api/summarize'
     | '/restaurants/$slug'
@@ -106,6 +117,7 @@ export interface FileRouteTypes {
     | '/account'
     | '/admin'
     | '/login'
+    | '/account/security'
     | '/admin/moderation'
     | '/api/summarize'
     | '/restaurants/$slug'
@@ -113,7 +125,7 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
-  AccountRoute: typeof AccountRoute
+  AccountRoute: typeof AccountRouteWithChildren
   AdminRoute: typeof AdminRouteWithChildren
   LoginRoute: typeof LoginRoute
   ApiSummarizeRoute: typeof ApiSummarizeRoute
@@ -171,8 +183,26 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminModerationRouteImport
       parentRoute: typeof AdminRoute
     }
+    '/account/security': {
+      id: '/account/security'
+      path: '/security'
+      fullPath: '/account/security'
+      preLoaderRoute: typeof AccountSecurityRouteImport
+      parentRoute: typeof AccountRoute
+    }
   }
 }
+
+interface AccountRouteChildren {
+  AccountSecurityRoute: typeof AccountSecurityRoute
+}
+
+const AccountRouteChildren: AccountRouteChildren = {
+  AccountSecurityRoute: AccountSecurityRoute,
+}
+
+const AccountRouteWithChildren =
+  AccountRoute._addFileChildren(AccountRouteChildren)
 
 interface AdminRouteChildren {
   AdminModerationRoute: typeof AdminModerationRoute
@@ -186,7 +216,7 @@ const AdminRouteWithChildren = AdminRoute._addFileChildren(AdminRouteChildren)
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
-  AccountRoute: AccountRoute,
+  AccountRoute: AccountRouteWithChildren,
   AdminRoute: AdminRouteWithChildren,
   LoginRoute: LoginRoute,
   ApiSummarizeRoute: ApiSummarizeRoute,
@@ -195,13 +225,3 @@ const rootRouteChildren: RootRouteChildren = {
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
-
-import type { getRouter } from './router.tsx'
-import type { startInstance } from './start.ts'
-declare module '@tanstack/react-start' {
-  interface Register {
-    ssr: true
-    router: Awaited<ReturnType<typeof getRouter>>
-    config: Awaited<ReturnType<typeof startInstance.getOptions>>
-  }
-}

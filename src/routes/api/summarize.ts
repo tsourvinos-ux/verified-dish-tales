@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { createClient } from "@supabase/supabase-js";
 import type { Database } from "@/integrations/supabase/types";
 import { z } from "zod";
-import { checkRateLimit } from "@/integrations/upstash/ratelimit.server";
+import { checkAll, getClientIp } from "@/integrations/upstash/ratelimit.server";
 
 const bodySchema = z.object({
   business_id: z.string().uuid(),
@@ -80,11 +80,21 @@ export const Route = createFileRoute("/api/summarize")({
           return new Response("Unauthorized", { status: 401 });
         }
 
-        const rl = await checkRateLimit({
-          key: `rl:summarize:${String(claims.claims.sub)}`,
-          limit: RATE_LIMIT_PER_WINDOW,
-          windowSec: RATE_WINDOW_SEC,
-        });
+        // @business-logic: per-user (10/10min) AND per-IP (60/10min) cap.
+        // Per-IP catches token-sharing/scrape; per-user is the cost guardrail.
+        const ip = getClientIp(request);
+        const rl = await checkAll([
+          {
+            key: `rl:summarize:${String(claims.claims.sub)}`,
+            limit: RATE_LIMIT_PER_WINDOW,
+            windowSec: RATE_WINDOW_SEC,
+          },
+          {
+            key: `rl:summarize:ip:${ip}`,
+            limit: 60,
+            windowSec: RATE_WINDOW_SEC,
+          },
+        ]);
         if (!rl.ok) {
           return new Response("Rate limit exceeded. Try again later.", {
             status: 429,

@@ -3,6 +3,12 @@
   "private": true,
   "sideEffects": false,
   "type": "module",
+  "license": "AGPL-3.0-or-later",
+  "engines": {
+    "bun": ">=1.1.0",
+    "node": ">=20.0.0"
+  },
+  "packageManager": "bun@1.1.0",
   "scripts": {
     "dev": "vite dev",
     "build": "vite build",
@@ -10,7 +16,10 @@
     "preview": "vite preview",
     "lint": "eslint .",
     "format": "prettier --write .",
-    "test": "vitest run"
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "test:e2e": "playwright test",
+    "audit": "bun audit || npm audit --audit-level=high"
   },
   "dependencies": {
     "@cloudflare/vite-plugin": "^1.25.5",
