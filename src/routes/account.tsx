@@ -7,7 +7,7 @@ import { redeemReward } from "@/lib/ledger.functions";
 import { Nav } from "@/components/Nav";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
-import { ShieldCheck, Ticket } from "lucide-react";
+import { ShieldCheck, Ticket, Smartphone } from "lucide-react";
 
 export const Route = createFileRoute("/account")({
   head: () => ({ meta: [{ title: "Wallet — TasteLedger" }] }),
@@ -100,6 +100,16 @@ function AccountPage() {
           <p className="text-xs uppercase tracking-[0.3em] text-clay">Verified rewards wallet</p>
           <h1 className="font-serif text-4xl text-forest mt-2">My ledger</h1>
         </header>
+
+        <aside className="mb-8 rounded-2xl border border-forest/15 bg-card/60 p-4 flex items-start gap-3">
+          <Smartphone className="w-5 h-5 text-clay shrink-0 mt-0.5" />
+          <div className="text-sm text-forest/80 leading-relaxed">
+            <p className="font-serif text-base text-forest">Carry your wallet in your pocket</p>
+            <p className="text-xs text-forest/60 mt-1">
+              Add TasteLedger to your home screen — on iOS use Share → <em>Add to Home Screen</em>; on Android use the browser menu → <em>Install app</em>.
+            </p>
+          </div>
+        </aside>
 
         <section>
           <h2 className="font-serif text-xl text-forest mb-4">Active</h2>
