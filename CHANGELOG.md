@@ -4,6 +4,16 @@ All notable changes to this project are documented here. This project follows [S
 
 ## [1.0.0] — Verified Rewards & Immutable Ledger
 
+## [1.0.2] — Rate limiting, tests, ADR, load-test harness
+
+### Added
+
+- Per-user in-memory token-bucket rate limit on `/api/summarize` (10 req / 10 min, `429` + `Retry-After` on exceed). Best-effort, single-isolate; documented in `docs/SECURITY.md`.
+- Vitest harness with 11 tests covering Zod bounds/sanitisation and `sanitizeForPrompt` prompt-injection defences. `bun run test`.
+- `docs/ADR-001-no-service-worker.md` codifying the offline/SW decision (preview iframe + stale-shell hazards) so future audits stop re-flagging it.
+- `scripts/loadtest.ts` for manual load-testing of `/api/summarize` (p50/p95/p99, cache hit rate, 429 count) and reward redemption (single-success invariant under concurrent contention).
+- README "Testing" and "Load testing" sections; updated audit-reconciliation footnote.
+
 ## [1.0.1] — Lint guard + audit reconciliation
 
 ### Added
