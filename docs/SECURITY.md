@@ -79,3 +79,13 @@ Each layer assumes the layer above is hostile.
 - `auth-middleware.ts` validates the bearer token via `getClaims()` — does not call `getUser()` (avoids an extra round-trip and avoids trusting unverified user data).
 - The browser Supabase client uses the publishable key only. The publishable key is safe in the bundle.
 - The service-role key is never imported by any module reachable from `src/routes/__root.tsx`.
+
+## Known gaps
+
+- **No request-level rate limiting** on `/api/summarize`. The platform does not yet expose rate-limiting primitives. Cost-amplification risk is mitigated by:
+  1. Auth required (`Bearer <jwt>`) — anonymous traffic is rejected.
+  2. `limit` clamped to 5–40 reviews per request via Zod.
+  3. Server-side LRU cache (5-min TTL, key includes review count + latest `created_at`) — repeated summaries for the same business are served from memory.
+  4. `Cache-Control: private, max-age=60` so browsers/clients also reuse responses.
+
+  Proper per-user / per-IP rate limiting will be added when the platform supports it.

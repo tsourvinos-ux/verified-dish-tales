@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
 import type { Session, User } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
 
@@ -16,19 +16,69 @@ interface AuthState {
 
 const AuthContext = createContext<AuthState | undefined>(undefined);
 
+// @complexity-explanation: Module-level cache survives provider remounts (HMR,
+// route swaps) so we don't refire the two role/membership queries each time.
+// 5-minute TTL bounds staleness; sign-out clears via setTimeout-free path below.
+type ProfileCacheEntry = {
+  roles: AppRole[];
+  memberships: string[];
+  fetchedAt: number;
+};
+const PROFILE_CACHE = new Map<string, ProfileCacheEntry>();
+const PROFILE_TTL_MS = 5 * 60 * 1000;
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [roles, setRoles] = useState<AppRole[]>([]);
   const [memberships, setMemberships] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // @complexity-explanation: subscribe BEFORE getSession to avoid missing the initial INITIAL_SESSION event
+  const loadProfile = useCallback(async (userId: string) => {
+    const cached = PROFILE_CACHE.get(userId);
+    if (cached && Date.now() - cached.fetchedAt < PROFILE_TTL_MS) {
+      setRoles(cached.roles);
+      setMemberships(cached.memberships);
+      return;
+    }
+    const [r, m] = await Promise.allSettled([
+      supabase.from("user_roles").select("role").eq("user_id", userId),
+      supabase.from("business_profile_membership").select("business_id").eq("user_id", userId),
+    ]);
+    let nextRoles = cached?.roles ?? [];
+    let nextMemberships = cached?.memberships ?? [];
+    if (r.status === "fulfilled" && !r.value.error) {
+      nextRoles = (r.value.data ?? []).map((x) => x.role as AppRole);
+    } else if (r.status === "rejected") {
+      console.error("[auth] failed to load roles", r.reason);
+    } else if (r.status === "fulfilled" && r.value.error) {
+      console.error("[auth] roles query error", r.value.error);
+    }
+    if (m.status === "fulfilled" && !m.value.error) {
+      nextMemberships = (m.value.data ?? []).map((x) => x.business_id);
+    } else if (m.status === "rejected") {
+      console.error("[auth] failed to load memberships", m.reason);
+    } else if (m.status === "fulfilled" && m.value.error) {
+      console.error("[auth] memberships query error", m.value.error);
+    }
+    setRoles(nextRoles);
+    setMemberships(nextMemberships);
+    PROFILE_CACHE.set(userId, {
+      roles: nextRoles,
+      memberships: nextMemberships,
+      fetchedAt: Date.now(),
+    });
+  }, []);
+
+  // @complexity-explanation: subscribe BEFORE getSession to avoid missing the initial INITIAL_SESSION event.
+  // queueMicrotask defers past the auth callback (so RLS sees the new JWT) without
+  // a 16ms macrotask delay from setTimeout(..., 0).
   useEffect(() => {
     const { data: sub } = supabase.auth.onAuthStateChange((_event, s) => {
       setSession(s);
       if (s?.user) {
-        // defer so RLS-bound reads see the new JWT
-        setTimeout(() => loadProfile(s.user.id), 0);
+        queueMicrotask(() => {
+          void loadProfile(s.user.id);
+        });
       } else {
         setRoles([]);
         setMemberships([]);
@@ -43,16 +93,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     });
     return () => sub.subscription.unsubscribe();
-  }, []);
-
-  async function loadProfile(userId: string) {
-    const [r, m] = await Promise.all([
-      supabase.from("user_roles").select("role").eq("user_id", userId),
-      supabase.from("business_profile_membership").select("business_id").eq("user_id", userId),
-    ]);
-    setRoles((r.data ?? []).map((x) => x.role as AppRole));
-    setMemberships((m.data ?? []).map((x) => x.business_id));
-  }
+  }, [loadProfile]);
 
   const value: AuthState = {
     session,
@@ -61,10 +102,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     memberships,
     loading,
     signOut: async () => {
+      const uid = session?.user?.id;
+      if (uid) PROFILE_CACHE.delete(uid);
       await supabase.auth.signOut();
     },
     refresh: async () => {
-      if (session?.user) await loadProfile(session.user.id);
+      if (session?.user) {
+        PROFILE_CACHE.delete(session.user.id);
+        await loadProfile(session.user.id);
+      }
     },
   };
 
