@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as RestaurantsSlugRouteImport } from './routes/restaurants.$slug'
 import { Route as ApiSummarizeRouteImport } from './routes/api/summarize'
 
 const LoginRoute = LoginRouteImport.update({
@@ -23,6 +24,11 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const RestaurantsSlugRoute = RestaurantsSlugRouteImport.update({
+  id: '/restaurants/$slug',
+  path: '/restaurants/$slug',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiSummarizeRoute = ApiSummarizeRouteImport.update({
   id: '/api/summarize',
   path: '/api/summarize',
@@ -33,30 +39,34 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
   '/api/summarize': typeof ApiSummarizeRoute
+  '/restaurants/$slug': typeof RestaurantsSlugRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
   '/api/summarize': typeof ApiSummarizeRoute
+  '/restaurants/$slug': typeof RestaurantsSlugRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
   '/api/summarize': typeof ApiSummarizeRoute
+  '/restaurants/$slug': typeof RestaurantsSlugRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/login' | '/api/summarize'
+  fullPaths: '/' | '/login' | '/api/summarize' | '/restaurants/$slug'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/login' | '/api/summarize'
-  id: '__root__' | '/' | '/login' | '/api/summarize'
+  to: '/' | '/login' | '/api/summarize' | '/restaurants/$slug'
+  id: '__root__' | '/' | '/login' | '/api/summarize' | '/restaurants/$slug'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   LoginRoute: typeof LoginRoute
   ApiSummarizeRoute: typeof ApiSummarizeRoute
+  RestaurantsSlugRoute: typeof RestaurantsSlugRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -75,6 +85,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/restaurants/$slug': {
+      id: '/restaurants/$slug'
+      path: '/restaurants/$slug'
+      fullPath: '/restaurants/$slug'
+      preLoaderRoute: typeof RestaurantsSlugRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/summarize': {
       id: '/api/summarize'
       path: '/api/summarize'
@@ -89,6 +106,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   LoginRoute: LoginRoute,
   ApiSummarizeRoute: ApiSummarizeRoute,
+  RestaurantsSlugRoute: RestaurantsSlugRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
