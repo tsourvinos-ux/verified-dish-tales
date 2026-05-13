@@ -6,6 +6,7 @@ import {
   ownerResponseSchema,
   redeemRewardSchema,
 } from "./schemas";
+import { moderateContent } from "./moderation.server";
 
 // @business-logic: Submits a patron review. Immutable once written (no UPDATE/DELETE policies).
 export const submitReview = createServerFn({ method: "POST" })
@@ -13,6 +14,11 @@ export const submitReview = createServerFn({ method: "POST" })
   .inputValidator((input: unknown) => reviewSchema.parse(input))
   .handler(async ({ data, context }) => {
     const { supabase, userId } = context;
+    // @business-logic: Pre-write moderation. "high" rejects, "low" inserts hidden.
+    const verdict = await moderateContent(data.content);
+    if (!verdict.allow) {
+      throw new Error(verdict.reason ?? "This review can't be published.");
+    }
     const { error, data: row } = await supabase
       .from("reviews")
       .insert({
@@ -20,13 +26,26 @@ export const submitReview = createServerFn({ method: "POST" })
         rating: data.rating,
         content: data.content,
         user_id: userId,
+        is_visible: verdict.visible,
+        moderation_reason: verdict.reason,
       })
       .select("id")
       .single();
     if (error) throw new Error(error.message);
 
+    if (verdict.severity !== "none") {
+      await supabase.from("moderation_flags").insert({
+        target_table: "reviews",
+        target_id: row.id,
+        reason: verdict.reason ?? "auto-flagged",
+        severity: verdict.severity,
+        auto: true,
+      });
+    }
+
     // @business-logic: 5-star reviews mint a single-use 14-day Verified Reward.
-    if (data.rating === 5) {
+    // Only mint if the review is visible (don't reward hidden/flagged content).
+    if (data.rating === 5 && verdict.visible) {
       const expiry = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString();
       await supabase.from("verified_rewards").insert({
         user_id: userId,
@@ -44,13 +63,32 @@ export const submitOwnerResponse = createServerFn({ method: "POST" })
   .inputValidator((input: unknown) => ownerResponseSchema.parse(input))
   .handler(async ({ data, context }) => {
     const { supabase, userId } = context;
-    const { error } = await supabase.from("owner_responses").insert({
-      review_id: data.review_id,
-      business_id: data.business_id,
-      content: data.content,
-      author_id: userId,
-    });
+    const verdict = await moderateContent(data.content);
+    if (!verdict.allow) {
+      throw new Error(verdict.reason ?? "This response can't be published.");
+    }
+    const { error, data: row } = await supabase
+      .from("owner_responses")
+      .insert({
+        review_id: data.review_id,
+        business_id: data.business_id,
+        content: data.content,
+        author_id: userId,
+        is_visible: verdict.visible,
+        moderation_reason: verdict.reason,
+      })
+      .select("id")
+      .single();
     if (error) throw new Error(error.message);
+    if (verdict.severity !== "none" && row) {
+      await supabase.from("moderation_flags").insert({
+        target_table: "owner_responses",
+        target_id: row.id,
+        reason: verdict.reason ?? "auto-flagged",
+        severity: verdict.severity,
+        auto: true,
+      });
+    }
     return { ok: true };
   });
 
