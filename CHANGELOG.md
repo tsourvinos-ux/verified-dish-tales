@@ -2,6 +2,15 @@
 
 All notable changes to this project are documented here. This project follows [Semantic Versioning](https://semver.org/).
 
+## [1.2.0] — Open-source readiness, hardening, observability
+
+### Added
+
+- **`LICENSE`** (AGPL-3.0-or-later) and SPDX declaration in `package.json`.
+- **Open Graph image** (`public/og-image.png`, 1200×630) wired into root route.
+- **`docs/REPO-METADATA.md`** with description + topics for GitHub repo settings.
+- **`engines`** field (`bun >=1.1`, `node >=20`) and npm-portable scripts (`typecheck`, `test:e2e`, `audit`).
+
 ## [1.0.0] — Verified Rewards & Immutable Ledger
 
 ## [1.0.2] — Rate limiting, tests, ADR, load-test harness
