@@ -1,71 +1,125 @@
-# Follow-up hardening plan
+# Sections 1 + 2 — Security & Reliability + Scalability
 
-Four small, scoped items. No schema changes. No business-logic changes to the ledger or rewards.
+Eight items, sized roughly by risk. Migrations and secrets are called out explicitly.
 
-## 1. Per-user rate limit on `/api/summarize`
+## 1. Distributed rate limit on `/api/summarize` (Upstash Redis)
 
-The platform has no rate-limit primitive (per `<no-backend-rate-limiting>`), so we do an in-memory token bucket keyed by `claims.sub`. Honest best-effort, documented as such.
+Replace the in-memory token bucket with Upstash REST.
 
-- Add a `RATE_LIMIT` map in `src/routes/api/summarize.ts`: `Map<userId, { tokens: number, refilledAt: number }>`.
-- Bucket: 10 requests per 10 minutes per user, refill linearly.
-- On exceed → `429` with `Retry-After` header, no upstream call.
-- Update `docs/SECURITY.md` "Known gaps" to reflect the new bucket and its single-instance limitation.
-- Update `CHANGELOG.md` (`[1.0.2]`).
+- New secrets (will prompt via `add_secret` once approved): `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN`.
+- New module `src/integrations/upstash/ratelimit.server.ts` — sliding-window via two Redis ops (`INCR` + `EXPIRE` on first hit), no extra deps.
+- `src/routes/api/summarize.ts`: replace `rateLimitTake()` call site; on Upstash failure, **fail open** and log (availability > rate-limit precision). Headers: `X-RateLimit-Remaining`, `Retry-After`.
+- 10 req / 10 min per user retained; key = `rl:summarize:{userId}`.
+- Update `docs/SECURITY.md` Known Gaps → mark resolved.
 
-## 2. Testing — minimal but real
+## 2. Content moderation — pre-screen + admin override
 
-README currently has zero test mention. Add a thin Vitest harness focused on the highest-leverage pure logic:
+**Schema (migration):**
+- Add `is_visible boolean NOT NULL DEFAULT true` to `reviews` and `owner_responses`.
+- Add `moderation_reason text` (nullable) to both.
+- New table `moderation_flags`: `id`, `target_table`, `target_id`, `reason`, `auto bool`, `created_at`.
+- RLS: public SELECT on reviews/owner_responses gains `WHERE is_visible`; admin SELECT bypass via existing `has_role(uid, 'admin')`.
+- Admin-only UPDATE policy on `is_visible` (the only field admins can flip — content stays immutable).
 
-- `bun add -D vitest @vitest/ui`
-- `vitest.config.ts` (jsdom, alias `@` → `src`)
-- `src/lib/__tests__/schemas.test.ts` — bounds + sanitisation (script tag stripped, control chars, length 9 rejected, length 10 accepted, length 1001 rejected).
-- `src/routes/api/__tests__/summarize-sanitize.test.ts` — `sanitizeForPrompt` neutralises `\nSYSTEM:` injection and caps length.
-- Add `"test": "vitest run"` to `package.json`.
-- README: new "Testing" section with `bun test` instructions and what is / isn't covered (no e2e, no DB integration).
+**Pre-screen on insert:**
+- `src/lib/moderation.server.ts` — calls Lovable AI (`google/gemini-2.5-flash-lite`) with a strict JSON schema: `{ allow: boolean, reason: string|null, severity: "none"|"low"|"high" }`.
+- `submitReview` and `submitOwnerResponse` in `ledger.functions.ts` call moderation before insert. `severity: "high"` → reject with user-facing message. `severity: "low"` → insert with `is_visible=false` + auto flag row. Pass: insert visible.
+- AI failure → fail open, insert visible, queue an auto-flag for admin review.
 
-Out of scope: RLS integration tests (require a live test project), Playwright/e2e.
+**Admin UI:** new `/admin/moderation` route — paginated list of `is_visible=false` rows + flagged-but-visible rows. Toggle button calls `setVisibility` server fn.
 
-## 3. Offline support — decision record
+## 3. RLS integration tests (separate Supabase project)
 
-Codify the existing decision so future audits stop re-flagging it.
+- New devDeps: none required (reuse Supabase JS + Vitest).
+- Test secrets read from env (CI-style): `TEST_SUPABASE_URL`, `TEST_SUPABASE_ANON_KEY`, `TEST_SUPABASE_SERVICE_ROLE_KEY`. Documented in README; not added to project secrets (manual export when running locally).
+- New `src/__tests__/rls/` with a `beforeAll` that:
+  - Creates 3 disposable users (patron, restaurateur, admin) via service-role admin API.
+  - Seeds a business and grants restaurateur membership.
+  - Yields per-role authed Supabase clients.
+- Coverage:
+  - `reviews`: patron can INSERT own + cannot UPDATE/DELETE; another patron cannot INSERT as victim.
+  - `owner_responses`: restaurateur of business CAN INSERT once; second insert fails on `UNIQUE(review_id)`; non-member restaurateur denied.
+  - `verified_rewards`: owner can flip `used_at` once; second redeem fails; cannot null it; cannot set on someone else's reward.
+  - `is_visible` (new): non-admin UPDATE denied.
+- Vitest tag: `tests/rls/**`, separate `vitest.config.rls.ts`. New script `bun run test:rls`. Skipped (not failed) if env vars absent so the default `bun run test` stays green.
 
-- New `docs/ADR-001-no-service-worker.md` documenting:
-  - Lovable preview iframe + stale-install hazard.
-  - PWA manifest + icons retained for "Add to Home Screen".
-  - Re-evaluation triggers (custom domain on production, native wrapper, etc.).
-- Link from README's Audit Reconciliation footnote.
+## 4. JWT expiry / refresh handling in `use-auth.tsx`
 
-## 4. Load-test script for AI + reward flows
+- `supabase-js` already auto-refreshes; the gap is UX when refresh fails (offline, revoked).
+- Subscribe to `TOKEN_REFRESHED` and `SIGNED_OUT` events; on `SIGNED_OUT` while route is `_authenticated`, redirect to `/login?reason=expired`.
+- Add a 60s focus-visibility check: if `session.expires_at - now < 60`, force `supabase.auth.refreshSession()`.
+- Toast on permanent refresh failure.
 
-Single Node script, not wired into CI. Lives in `scripts/loadtest.ts`. User runs manually against preview/published.
+## 5. Caching: business ledger feed
 
-- Uses `undici` (already transitive) or native `fetch`, no new prod deps; `bun add -D tsx` if not present.
-- Two scenarios:
-  - `summarize`: N concurrent authenticated POSTs to `/api/summarize` for one `business_id`, measures p50/p95/p99 latency, cache hit rate (via `X-Summary-Cache` header), 429 count.
-  - `redeem`: N concurrent attempts to redeem the **same** `reward_id` — must observe exactly 1 success, N-1 "already redeemed" errors (validates the atomic UPDATE + trigger).
-- Reads `LOADTEST_BEARER`, `LOADTEST_BASE_URL`, `LOADTEST_BUSINESS_ID`, `LOADTEST_REWARD_ID` from env.
-- Output: plain-text report to stdout.
-- README: short "Load testing" subsection with the env vars and example invocation.
+- New server fn `getBusinessLedger(business_id, cursor?)` returning normalised reviews+responses.
+- Same in-memory LRU pattern as summarize: keyed on `business_id + reviewCount + max(updated)`.
+- HTTP `Cache-Control: public, max-age=30` on the response.
+- React Query on the client: 30s `staleTime`, `placeholderData: keepPreviousData` for cursor changes.
 
-## Files touched
+## 6. Cursor-based pagination on the ledger feed
+
+- Cursor = last `created_at` (ISO) + last `id` (tiebreaker), encoded base64.
+- Server fn returns `{ items, nextCursor | null }` with `LIMIT 20`.
+- `restaurants.$slug.tsx`: replace single fetch with `useInfiniteQuery`; intersection-observer sentinel triggers `fetchNextPage`.
+- DB index: `CREATE INDEX idx_reviews_business_created ON reviews (business_id, created_at DESC, id DESC)` — covers existing `idx_reviews_business_created` if present, else add via migration.
+
+## 7. DB indexes — verify + add what's missing
+
+Audit existing migration `20260513*` indexes; the brief lists ones already shipped. Confirm and add only the gaps:
+- `verified_rewards (user_id, used_at)` partial: `WHERE used_at IS NULL` (Active wallet hot path).
+- `reviews (business_id, created_at DESC, id DESC)` (pagination).
+- `owner_responses (review_id)` — already enforced by UNIQUE; no-op.
+- `moderation_flags (target_table, target_id)`.
+
+## 8. Static-asset caching (Cloudflare via Worker headers)
+
+- `src/server.ts` — add response header rule: assets under `/assets/*` and `/icon-*.png`/manifest get `Cache-Control: public, max-age=31536000, immutable`. HTML stays `no-cache`.
+
+---
+
+## Order of execution
+
+1. Migration (items 2 schema + 7 indexes) — single migration.
+2. Approval gate; then I implement code changes for items 1, 2, 4, 5, 6, 8.
+3. Add Upstash secrets via `add_secret` tool (items 1 only).
+4. Tests (item 3) last so they cover the new `is_visible` policy.
+
+## Files touched (new ✚, edited ✎)
 
 ```text
-src/routes/api/summarize.ts        (rate limit)
-src/lib/__tests__/schemas.test.ts  (new)
-src/routes/api/__tests__/summarize-sanitize.test.ts (new)
-vitest.config.ts                    (new)
-package.json                        (test script, devDeps)
-scripts/loadtest.ts                 (new)
-docs/SECURITY.md                    (rate-limit note)
-docs/ADR-001-no-service-worker.md   (new)
-README.md                           (Testing + Load testing + ADR link)
-CHANGELOG.md                        ([1.0.2])
+✚ supabase/migrations/<ts>_moderation_visibility_indexes.sql
+✚ src/integrations/upstash/ratelimit.server.ts
+✚ src/lib/moderation.server.ts
+✚ src/lib/ledger-read.functions.ts        (getBusinessLedger, setVisibility)
+✚ src/routes/admin.moderation.tsx
+✚ src/__tests__/rls/setup.ts
+✚ src/__tests__/rls/reviews.rls.test.ts
+✚ src/__tests__/rls/owner-responses.rls.test.ts
+✚ src/__tests__/rls/rewards.rls.test.ts
+✚ vitest.config.rls.ts
+✎ src/routes/api/summarize.ts             (Upstash, drop in-memory bucket)
+✎ src/lib/ledger.functions.ts             (call moderation pre-insert)
+✎ src/hooks/use-auth.tsx                  (TOKEN_REFRESHED, focus refresh)
+✎ src/routes/restaurants.$slug.tsx        (useInfiniteQuery)
+✎ src/server.ts                           (asset cache headers)
+✎ src/components/Nav.tsx                  (admin moderation link)
+✎ package.json                            (test:rls script)
+✎ docs/SECURITY.md                        (rate-limit resolved, moderation, visibility RLS)
+✎ README.md                               (RLS test env vars, moderation note)
+✎ CHANGELOG.md                            ([1.1.0] — substantive feature bump)
 ```
 
-## Out of scope (explicitly)
+## Out of scope (deferred to a later plan)
 
-- Service worker implementation (covered by ADR-001).
-- Distributed rate limiting (no platform primitive yet).
-- E2E browser tests.
-- Database migrations.
-- Any change to RLS, triggers, or reward state machine.
+- Section 3 features (i18n, photo uploads, QR, analytics, directory).
+- Section 4 (CI/CD, Playwright, Renovate, contribution guide).
+- Section 5 (landing page, badges, OSS community).
+- Quick wins (OG tags, dark mode, friendly reward codes, share button).
+
+## Risks & mitigations
+
+- **Upstash availability** — fail-open + log; rate-limit is a cost guardrail, not a security boundary, so this is acceptable.
+- **AI moderation latency** (~500ms per write) — acknowledged; mitigated by fail-open and pre-screen running in parallel with sanitisation, not after.
+- **RLS test project cost** — kept off CI default; user runs manually with `bun run test:rls` after setting the three env vars.
+- **Pagination + cache invalidation** — cache key is bound to `max(updated)` so first page invalidates immediately on a new review; nested pages stay valid.
