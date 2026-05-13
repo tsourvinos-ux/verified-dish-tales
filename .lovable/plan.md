@@ -1,90 +1,67 @@
-## Verified Restaurant Review Ledger — Build Plan
+# Close audit gaps (docs + PWA install + streaming polish)
 
-A zero-trust ledger app where patrons leave reviews, restaurateurs post immutable responses, and patrons earn single-use Verified Rewards. Mobile-first chat-style feed with PWA install + AI summaries.
+The audit conflates "not present in repo" with "not implemented." Migrations, RLS, CHECK constraints, the immutability trigger, Zod validation, and SSE streaming all exist. The genuine gaps are documentation, an install manifest, and verifying the streaming UI.
 
-### 1. Backend foundation (Lovable Cloud)
+## 1. Documentation
 
-Enable Lovable Cloud, then create schema via migration:
+**`README.md`** (root)
+- Product mission + objectives (verbatim from project knowledge)
+- Architecture overview: TanStack Start + Lovable Cloud (Supabase), `createServerFn` as the server layer, no Edge Functions by design
+- Personas + access model (admin / restaurateur / patron, `has_role()` + `is_business_member()`)
+- Local dev / build commands
+- **Audit reconciliation** section: explicitly maps each "missing" claim to the file/policy that already implements it (migrations paths, RLS policy names, the `prevent_used_at_overwrite` trigger, `src/routes/api/summarize.ts` for streaming, why Edge Functions are intentionally absent)
 
-- `app_role` enum: `admin`, `restaurateur`, `patron`
-- `user_roles` (user_id, role) — roles **never** on profiles. `has_role()` security-definer fn.
-- `profiles` (id → auth.users, display_name, is_verified)
-- `businesses` (id, name, slug, cuisine, address, cover_url, created_by)
-- `business_profile_membership` (business_id, user_id, role) — ownership join
-- `reviews` (id, business_id, user_id, rating 1–5, content text, created_at)
-  - CHECK length 10–1000, immutable (no UPDATE/DELETE policy)
-- `owner_responses` (id, review_id, business_id, author_id, content, created_at)
-  - CHECK `char_length(content) BETWEEN 10 AND 500`, one response per review (UNIQUE), immutable
-- `verified_rewards` (id, user_id, business_id, code, title, expiry_date, used_at, created_at)
-  - CHECK `used_at IS NULL OR used_at >= created_at`
-  - Trigger `prevent_used_at_overwrite`: raises if `OLD.used_at IS NOT NULL AND NEW.used_at IS DISTINCT FROM OLD.used_at`
+**`.lovable/instructions.md`** — persistent AI directives
+- Security: no `service_role` in client; all writes go through `createServerFn` with `requireSupabaseAuth`; Zod-validated; RLS-scoped by `auth.uid()`
+- Architecture: strict TS, no `any`; three-state pattern (Loading skeleton / Authorized / `AccessDenied`); `// @business-logic` and `// @complexity-explanation` tags
+- UI: streaming token-by-token for AI; Stop button; mobile-first chat bubbles (right=patron/forest, left=owner/muted)
+- Immutability invariants: reviews/owner_responses are append-only; `used_at` flips once
 
-RLS (every table, no service-role usage in client):
-- `reviews`: SELECT public; INSERT `auth.uid() = user_id`; no UPDATE/DELETE
-- `owner_responses`: SELECT public; INSERT requires `EXISTS (SELECT 1 FROM business_profile_membership m WHERE m.user_id = auth.uid() AND m.business_id = NEW.business_id)`; no UPDATE/DELETE
-- `verified_rewards`: SELECT `auth.uid() = user_id`; UPDATE only by owner and only flipping `used_at` from NULL → now() (column-grant + WITH CHECK); admin INSERT via edge function
-- `businesses`: SELECT public; admin-only writes via `has_role(uid,'admin')`
-- `user_roles`, `business_profile_membership`: admin-managed; user can SELECT own rows
+**`docs/SECURITY.md`** — security model reference
+- Table-by-table RLS matrix (who can SELECT/INSERT/UPDATE/DELETE and under what predicate)
+- Database-level guarantees: CHECK constraints (rating 1–5, content length 10–1000 / 10–500), UNIQUE one-response-per-review, `prevent_used_at_overwrite` trigger
+- Validation pipeline: Zod sanitize → server fn → RLS → trigger
+- `/api/summarize` auth + prompt-injection mitigations (server-fetched content, sanitization)
+- Validation checklist (the four bullets from the project knowledge)
 
-Admin provisioning: seed one admin via SQL migration (instruct user to assign their auth user id post-signup, OR auto-promote first signup with documented note). Admin UI lets admin create businesses, assign restaurateur memberships, mint rewards.
+**`CHANGELOG.md`**
+- `v1.0.0 — Verified Rewards & Immutable Ledger` pinning current behaviour
 
-### 2. Edge Functions (gatekeepers, Zod-validated)
+## 2. PWA install (manifest only, no service worker)
 
-All write paths go through edge functions that re-validate with Zod and use the **caller's JWT** (not service role) so RLS still enforces:
+Per platform guidance, service workers break the Lovable preview iframe. Install-only manifest is enough for "Add to Home Screen."
 
-- `submit-review` — Zod {business_id uuid, rating 1–5, content 10–1000}, sanitize, insert
-- `submit-owner-response` — Zod {review_id, business_id, content 10–500}, sanitize, insert
-- `redeem-reward` — Zod {reward_id}; updates `used_at = now()` where `used_at IS NULL AND expiry_date > now()`; returns redemption proof
-- `mint-reward` (admin) — Zod {user_id, business_id, title, expiry_date}
-- `summarize-reviews` — streaming SSE proxy to Lovable AI Gateway (`google/gemini-3-flash-preview`); supports AbortController for Stop button
-- `verify-jwt = true` on all of them; sanitization strips `<script>` and control chars
+- `public/manifest.webmanifest` — name "TasteLedger", short_name, `display: "standalone"`, `start_url: "/"`, `theme_color`/`background_color` from forest/cream tokens, icons array
+- `public/icon-192.png`, `public/icon-512.png` — generate via imagegen (cream background, forest "TL" monogram in serif)
+- `<link rel="manifest" href="/manifest.webmanifest">` + `theme-color` meta in `src/routes/__root.tsx` head
+- `<link rel="apple-touch-icon">` for iOS home-screen
+- Small "Install on your phone" hint card on `/account` (no JS install prompt — keep simple)
 
-### 3. Frontend (TanStack Start, file-based routes)
+No service worker, no `vite-plugin-pwa`, no offline cache.
 
-Public:
-- `/` — landing + featured restaurants grid (seeded)
-- `/restaurants/$slug` — restaurant header, **chat-style ledger feed** (right-aligned branded review bubbles, left-aligned gray response bubbles, timestamps, "Verified" badge by owner name), AI summary panel with Stop button
-- `/login`, `/signup`
+## 3. Streaming UI verification
 
-Authenticated (`_authenticated` layout, gated `beforeLoad`):
-- `/account` — profile, my reviews, **my rewards** wallet (filters expired client-side, shows Active/Used)
-- `/restaurants/$slug` review composer (patron) or response composer (restaurateur, only if membership matches)
-- `/admin` (role-gated by `has_role('admin')`) — create business, assign restaurateur, mint reward
+Audit `src/routes/restaurants.$slug.tsx` `AISummaryPanel`:
+- Confirm SSE chunks append to state on each `data:` event (not buffered until completion)
+- Confirm Stop button calls `controller.abort()` and resets state cleanly
+- Add a subtle pulsing cursor `▍` at the end of the streaming text while `isStreaming` is true
+- If buffering is found, switch to per-chunk `setSummary(prev => prev + delta)`
 
-Shared:
-- `AccessDenied` component, `Skeleton`-based loading; every protected component handles Loading / Authorized / Unauthorized
-- Zod schemas in `src/lib/schemas.ts` (single source for client + edge fn). Submit buttons disabled when invalid (10–500 / 10–1000)
-- Strict TS, no `any`. `// @business-logic` tags on reward redemption + response insert paths
+## 4. Out of scope (explicitly)
 
-### 4. PWA
+- Supabase Edge Functions — TanStack Start uses `createServerFn`; duplicating is anti-pattern per framework docs
+- Service worker / offline cache — breaks preview, ships stale shells to installed PWAs
+- New migrations — current schema satisfies all stated invariants
+- CI/CD workflows — Lovable handles build/deploy; `.github/workflows` is not the right surface here
 
-Install-only manifest (no service worker — preview-safe per platform guidance):
-- `public/manifest.webmanifest` with icons, `display: "standalone"`, `start_url: "/"`
-- Link tag in root head; install prompt component on `/account`
+## Files touched
 
-(Full offline service worker is risky in the Lovable preview iframe; flagged as a follow-up if user insists.)
-
-### 5. AI Summaries (streaming)
-
-`/restaurants/$slug` page has "Generate ledger summary" button → fetches `/functions/v1/summarize-reviews` with SSE, renders tokens incrementally, Stop button calls `controller.abort()`. Handles 402/429 with toasts.
-
-### 6. Seed data
-
-Migration inserts ~5 demo restaurants with cover images + a handful of seeded reviews so the feed isn't empty.
-
-### 7. Design
-
-Mobile-first, chat-bubble feed. I'll generate 3 design directions before building so you can pick the visual language (palette, typography, bubble treatment, badge style).
-
-### Build order
-
-1. Enable Lovable Cloud, schema migration + RLS + trigger + seed
-2. Auth (email/password + Google), `_authenticated` guard, profile auto-create trigger
-3. Design directions → pick one → tokens into `styles.css`
-4. Public restaurant pages + ledger feed UI
-5. Review + owner-response composers + edge functions
-6. Rewards wallet + redemption edge function
-7. Admin console (create business, assign restaurateur, mint reward)
-8. AI summary streaming + Stop
-9. PWA manifest
-10. Security scan pass
+- `README.md` (new)
+- `.lovable/instructions.md` (new)
+- `docs/SECURITY.md` (new)
+- `CHANGELOG.md` (new)
+- `public/manifest.webmanifest` (new)
+- `public/icon-192.png`, `public/icon-512.png` (new, generated)
+- `src/routes/__root.tsx` (head links)
+- `src/routes/account.tsx` (install hint card)
+- `src/routes/restaurants.$slug.tsx` (streaming UI polish if needed)
