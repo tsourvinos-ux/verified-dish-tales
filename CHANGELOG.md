@@ -10,6 +10,18 @@ All notable changes to this project are documented here. This project follows [S
 - **Open Graph image** (`public/og-image.png`, 1200×630) wired into root route.
 - **`docs/REPO-METADATA.md`** with description + topics for GitHub repo settings.
 - **`engines`** field (`bun >=1.1`, `node >=20`) and npm-portable scripts (`typecheck`, `test:e2e`, `audit`).
+- **Distributed rate limiting** extended: per-IP cap on `/api/summarize` (60/10min), per-user write cap on `submitReview` (10/hr), per-business cap on `submitOwnerResponse` (30/hr). All via Upstash, fail-open.
+- **MFA (TOTP)** at `/account/security` with soft-enforce banner for admin/restaurateur.
+- **Cloudflare Turnstile** CAPTCHA on signup (`src/components/Turnstile.tsx` + `verifyCaptcha` server fn). Activates when site key is filled in.
+- **HIBP password check** enabled via `configure_auth`.
+- **GitHub Actions**: `ci.yml` (typecheck + lint + vitest + Playwright e2e), `audit.yml` (weekly `bun audit`), `dependabot.yml` (grouped weekly).
+- **Playwright e2e** scaffolding (`e2e/review-flow.spec.ts`, `e2e/redeem-flow.spec.ts`).
+- **Sentry** integration: `@sentry/react` for browser, hand-rolled envelope poster for Workers (`src/lib/sentry.server.ts`). PII scrubber.
+- **`X-Request-ID`** propagation in `src/server.ts`; included in Sentry tags + console logs.
+- **Multi-language summaries** (8 locales) with **citation anchors** — model emits `[#abcd1234]` markers that render as `[src]` links jumping to the source review.
+- **ADR-002** (Upstash), **ADR-003** (moderation pipeline), **ADR-004** (Sentry on Workers).
+- **`CONTRIBUTING.md`** (DCO + hard rules) and **`CODE_OF_CONDUCT.md`** (Contributor Covenant 2.1).
+- **`docs/OPERATIONS.md`** runbook (backups, rate-limit tuning, incident playbook, secrets inventory).
 
 ## [1.0.0] — Verified Rewards & Immutable Ledger
 

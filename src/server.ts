@@ -2,6 +2,8 @@ import "./lib/error-capture";
 
 import { consumeLastCapturedError } from "./lib/error-capture";
 import { renderErrorPage } from "./lib/error-page";
+import { ensureRequestId, REQUEST_ID_HEADER } from "./lib/request-id";
+import { captureServerException } from "./lib/sentry.server";
 
 type ServerEntry = {
   fetch: (request: Request, env: unknown, ctx: unknown) => Promise<Response> | Response;
@@ -18,10 +20,13 @@ async function getServerEntry(): Promise<ServerEntry> {
   return serverEntryPromise;
 }
 
-function brandedErrorResponse(): Response {
+function brandedErrorResponse(requestId: string): Response {
   return new Response(renderErrorPage(), {
     status: 500,
-    headers: { "content-type": "text/html; charset=utf-8" },
+    headers: {
+      "content-type": "text/html; charset=utf-8",
+      [REQUEST_ID_HEADER]: requestId,
+    },
   });
 }
 
@@ -52,7 +57,10 @@ function isCatastrophicSsrErrorBody(body: string, responseStatus: number): boole
 
 // h3 swallows in-handler throws into a normal 500 Response with body
 // {"unhandled":true,"message":"HTTPError"} — try/catch alone never fires for those.
-async function normalizeCatastrophicSsrResponse(response: Response): Promise<Response> {
+async function normalizeCatastrophicSsrResponse(
+  response: Response,
+  requestId: string,
+): Promise<Response> {
   if (response.status < 500) return response;
   const contentType = response.headers.get("content-type") ?? "";
   if (!contentType.includes("application/json")) return response;
@@ -62,8 +70,10 @@ async function normalizeCatastrophicSsrResponse(response: Response): Promise<Res
     return response;
   }
 
-  console.error(consumeLastCapturedError() ?? new Error(`h3 swallowed SSR error: ${body}`));
-  return brandedErrorResponse();
+  const captured = consumeLastCapturedError() ?? new Error(`h3 swallowed SSR error: ${body}`);
+  console.error(`[${requestId}]`, captured);
+  captureServerException(captured, { requestId, tags: { source: "ssr-h3-swallow" } });
+  return brandedErrorResponse(requestId);
 }
 
 // Long-cache hashed assets (Vite emits content-hashed names under /assets/).
@@ -90,14 +100,35 @@ function withAssetCacheHeaders(request: Request, response: Response): Response {
 
 export default {
   async fetch(request: Request, env: unknown, ctx: unknown) {
+    const requestId = ensureRequestId(request.headers);
+    // Propagate so downstream handlers (server fns, /api routes) can read it
+    const propagated = new Request(request, {
+      headers: (() => {
+        const h = new Headers(request.headers);
+        h.set(REQUEST_ID_HEADER, requestId);
+        return h;
+      })(),
+    });
     try {
       const handler = await getServerEntry();
-      const response = await handler.fetch(request, env, ctx);
-      const normalized = await normalizeCatastrophicSsrResponse(response);
-      return withAssetCacheHeaders(request, normalized);
+      const response = await handler.fetch(propagated, env, ctx);
+      const normalized = await normalizeCatastrophicSsrResponse(response, requestId);
+      const headers = new Headers(normalized.headers);
+      headers.set(REQUEST_ID_HEADER, requestId);
+      const tagged = new Response(normalized.body, {
+        status: normalized.status,
+        statusText: normalized.statusText,
+        headers,
+      });
+      return withAssetCacheHeaders(request, tagged);
     } catch (error) {
-      console.error(error);
-      return brandedErrorResponse();
+      console.error(`[${requestId}]`, error);
+      captureServerException(error, {
+        requestId,
+        tags: { source: "fetch-top-level" },
+        extra: { url: request.url, method: request.method },
+      });
+      return brandedErrorResponse(requestId);
     }
   },
 };

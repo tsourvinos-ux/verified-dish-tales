@@ -122,13 +122,14 @@ function RestaurantPage() {
             )}
             <ul className="space-y-6">
               {reviews.map((r) => (
-                <LedgerEntry
-                  key={r.id}
-                  review={r}
-                  businessId={business.id}
-                  canRespond={isOwner}
-                  onResponded={() => queryClient.invalidateQueries({ queryKey: reviewsKey })}
-                />
+                <div key={r.id} id={`review-${r.id.slice(0, 8)}`}>
+                  <LedgerEntry
+                    review={r}
+                    businessId={business.id}
+                    canRespond={isOwner}
+                    onResponded={() => queryClient.invalidateQueries({ queryKey: reviewsKey })}
+                  />
+                </div>
               ))}
             </ul>
           </>
@@ -401,6 +402,7 @@ function AISummaryPanel({
 }) {
   const [text, setText] = useState("");
   const [streaming, setStreaming] = useState(false);
+  const [locale, setLocale] = useState<string>("en");
   const abortRef = useRef<AbortController | null>(null);
   const { session } = useAuth();
 
@@ -421,7 +423,7 @@ function AISummaryPanel({
           "Content-Type": "application/json",
           Authorization: `Bearer ${session.access_token}`,
         },
-        body: JSON.stringify({ business_id: business.id }),
+        body: JSON.stringify({ business_id: business.id, locale }),
         signal: ac.signal,
       });
       if (!res.ok || !res.body) {
@@ -458,6 +460,23 @@ function AISummaryPanel({
           <Sparkles className="w-4 h-4 text-clay" />
           <h3 className="font-serif text-lg text-forest">Ledger summary</h3>
         </div>
+        <div className="flex items-center gap-2">
+        <select
+          value={locale}
+          onChange={(e) => setLocale(e.target.value)}
+          disabled={streaming}
+          aria-label="Summary language"
+          className="text-[11px] uppercase tracking-widest bg-card border border-forest/15 rounded-full px-2 py-1 text-forest/70"
+        >
+          <option value="en">EN</option>
+          <option value="es">ES</option>
+          <option value="fr">FR</option>
+          <option value="de">DE</option>
+          <option value="it">IT</option>
+          <option value="pt">PT</option>
+          <option value="zh">ZH</option>
+          <option value="ja">JA</option>
+        </select>
         {streaming ? (
           <button
             onClick={stop}
@@ -477,10 +496,11 @@ function AISummaryPanel({
             Sign in to generate
           </span>
         )}
+        </div>
       </div>
       {text ? (
         <p className="mt-3 text-sm text-forest/85 leading-relaxed whitespace-pre-wrap">
-          {text}
+          {renderWithCitations(text, reviews)}
           {streaming && <span className="inline-block w-2 h-3 bg-clay align-middle ml-0.5 animate-pulse" />}
         </p>
       ) : (
@@ -502,4 +522,37 @@ function timeAgo(iso: string): string {
   const d = Math.floor(h / 24);
   if (d < 30) return `${d}d ago`;
   return new Date(iso).toLocaleDateString();
+}
+
+// @complexity-explanation: Replace [#abcd1234] markers in the streamed summary
+// with anchor links to the source review element. Falls back to plain text if
+// the cited id doesn't match any visible review (e.g. mid-stream truncation).
+function renderWithCitations(text: string, reviews: Review[]): React.ReactNode[] {
+  const ids = new Set(reviews.map((r) => r.id.slice(0, 8)));
+  const parts: React.ReactNode[] = [];
+  const re = /\[#([a-f0-9]{8})\]/gi;
+  let last = 0;
+  let m: RegExpExecArray | null;
+  let counter = 0;
+  while ((m = re.exec(text)) !== null) {
+    if (m.index > last) parts.push(text.slice(last, m.index));
+    const short = m[1].toLowerCase();
+    if (ids.has(short)) {
+      parts.push(
+        <a
+          key={`cite-${counter++}`}
+          href={`#review-${short}`}
+          className="text-clay underline underline-offset-2 hover:text-forest"
+          aria-label={`Source review ${short}`}
+        >
+          [src]
+        </a>,
+      );
+    } else {
+      parts.push(m[0]);
+    }
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) parts.push(text.slice(last));
+  return parts;
 }
