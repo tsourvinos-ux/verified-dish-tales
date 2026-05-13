@@ -66,12 +66,35 @@ async function normalizeCatastrophicSsrResponse(response: Response): Promise<Res
   return brandedErrorResponse();
 }
 
+// Long-cache hashed assets (Vite emits content-hashed names under /assets/).
+function withAssetCacheHeaders(request: Request, response: Response): Response {
+  const url = new URL(request.url);
+  const path = url.pathname;
+  const isHashedAsset = path.startsWith("/assets/");
+  const isStaticIcon = /^\/(?:icon-|apple-touch-icon|favicon|manifest)/.test(path);
+  if (!isHashedAsset && !isStaticIcon) return response;
+  if (response.status >= 400) return response;
+  const headers = new Headers(response.headers);
+  headers.set(
+    "Cache-Control",
+    isHashedAsset
+      ? "public, max-age=31536000, immutable"
+      : "public, max-age=86400",
+  );
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
+
 export default {
   async fetch(request: Request, env: unknown, ctx: unknown) {
     try {
       const handler = await getServerEntry();
       const response = await handler.fetch(request, env, ctx);
-      return await normalizeCatastrophicSsrResponse(response);
+      const normalized = await normalizeCatastrophicSsrResponse(response);
+      return withAssetCacheHeaders(request, normalized);
     } catch (error) {
       console.error(error);
       return brandedErrorResponse();
