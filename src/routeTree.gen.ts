@@ -10,6 +10,7 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as LoginRouteImport } from './routes/login'
+import { Route as AdminRouteImport } from './routes/admin'
 import { Route as AccountRouteImport } from './routes/account'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as RestaurantsSlugRouteImport } from './routes/restaurants.$slug'
@@ -18,6 +19,11 @@ import { Route as ApiSummarizeRouteImport } from './routes/api/summarize'
 const LoginRoute = LoginRouteImport.update({
   id: '/login',
   path: '/login',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminRoute = AdminRouteImport.update({
+  id: '/admin',
+  path: '/admin',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AccountRoute = AccountRouteImport.update({
@@ -44,6 +50,7 @@ const ApiSummarizeRoute = ApiSummarizeRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/account': typeof AccountRoute
+  '/admin': typeof AdminRoute
   '/login': typeof LoginRoute
   '/api/summarize': typeof ApiSummarizeRoute
   '/restaurants/$slug': typeof RestaurantsSlugRoute
@@ -51,6 +58,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/account': typeof AccountRoute
+  '/admin': typeof AdminRoute
   '/login': typeof LoginRoute
   '/api/summarize': typeof ApiSummarizeRoute
   '/restaurants/$slug': typeof RestaurantsSlugRoute
@@ -59,6 +67,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/account': typeof AccountRoute
+  '/admin': typeof AdminRoute
   '/login': typeof LoginRoute
   '/api/summarize': typeof ApiSummarizeRoute
   '/restaurants/$slug': typeof RestaurantsSlugRoute
@@ -68,15 +77,23 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/account'
+    | '/admin'
     | '/login'
     | '/api/summarize'
     | '/restaurants/$slug'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/account' | '/login' | '/api/summarize' | '/restaurants/$slug'
+  to:
+    | '/'
+    | '/account'
+    | '/admin'
+    | '/login'
+    | '/api/summarize'
+    | '/restaurants/$slug'
   id:
     | '__root__'
     | '/'
     | '/account'
+    | '/admin'
     | '/login'
     | '/api/summarize'
     | '/restaurants/$slug'
@@ -85,6 +102,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AccountRoute: typeof AccountRoute
+  AdminRoute: typeof AdminRoute
   LoginRoute: typeof LoginRoute
   ApiSummarizeRoute: typeof ApiSummarizeRoute
   RestaurantsSlugRoute: typeof RestaurantsSlugRoute
@@ -97,6 +115,13 @@ declare module '@tanstack/react-router' {
       path: '/login'
       fullPath: '/login'
       preLoaderRoute: typeof LoginRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin': {
+      id: '/admin'
+      path: '/admin'
+      fullPath: '/admin'
+      preLoaderRoute: typeof AdminRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/account': {
@@ -133,6 +158,7 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AccountRoute: AccountRoute,
+  AdminRoute: AdminRoute,
   LoginRoute: LoginRoute,
   ApiSummarizeRoute: ApiSummarizeRoute,
   RestaurantsSlugRoute: RestaurantsSlugRoute,
