@@ -42,6 +42,28 @@ function cacheSet(key: string, text: string) {
   SUMMARY_CACHE.set(key, { text, expiresAt: Date.now() + SUMMARY_TTL_MS });
 }
 
+// @business-logic: per-user token-bucket rate limit. In-memory + best-effort
+// (single Worker isolate). Documented in docs/SECURITY.md "Known gaps".
+// 10 requests / 10 min, refilled linearly.
+const RATE_CAPACITY = 10;
+const RATE_WINDOW_MS = 10 * 60 * 1000;
+const RATE_LIMIT = new Map<string, { tokens: number; refilledAt: number }>();
+function rateLimitTake(userId: string): { ok: true } | { ok: false; retryAfterSec: number } {
+  const now = Date.now();
+  const entry = RATE_LIMIT.get(userId) ?? { tokens: RATE_CAPACITY, refilledAt: now };
+  const elapsed = now - entry.refilledAt;
+  const refill = (elapsed / RATE_WINDOW_MS) * RATE_CAPACITY;
+  const tokens = Math.min(RATE_CAPACITY, entry.tokens + refill);
+  if (tokens < 1) {
+    const needed = 1 - tokens;
+    const retryAfterSec = Math.ceil((needed / RATE_CAPACITY) * (RATE_WINDOW_MS / 1000));
+    RATE_LIMIT.set(userId, { tokens, refilledAt: now });
+    return { ok: false, retryAfterSec };
+  }
+  RATE_LIMIT.set(userId, { tokens: tokens - 1, refilledAt: now });
+  return { ok: true };
+}
+
 // @business-logic: Streams an AI summary of a business's ledger via Lovable AI Gateway.
 // Requires an authenticated patron and fetches reviews server-side (no client-supplied content
 // is injected into the prompt). The UI uses an AbortController to support a Stop button.
