@@ -1,6 +1,9 @@
 import { useEffect, useRef } from "react";
 
-const SITE_KEY = import.meta.env.VITE_TURNSTILE_SITE_KEY as string | undefined;
+// Cloudflare Turnstile site key. Publishable — safe to commit. Set this to
+// your site key from https://dash.cloudflare.com → Turnstile to activate the
+// signup CAPTCHA. Leave empty to disable (dev / preview).
+const SITE_KEY: string = "";
 
 // @complexity-explanation: Cloudflare Turnstile loads its widget script lazily
 // and calls a global callback. We expose `onToken` via a per-instance window
