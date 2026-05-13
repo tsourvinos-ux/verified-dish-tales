@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import type { Session, User } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
 
@@ -32,6 +32,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [roles, setRoles] = useState<AppRole[]>([]);
   const [memberships, setMemberships] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
+  const manualSignOutRef = useRef(false);
 
   const loadProfile = useCallback(async (userId: string) => {
     const cached = PROFILE_CACHE.get(userId);
