@@ -3,6 +3,9 @@ import { useState, type FormEvent } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Nav } from "@/components/Nav";
 import { toast } from "sonner";
+import { useServerFn } from "@tanstack/react-start";
+import { verifyCaptcha } from "@/lib/captcha.functions";
+import { Turnstile, TURNSTILE_ENABLED } from "@/components/Turnstile";
 
 export const Route = createFileRoute("/login")({
   head: () => ({
@@ -21,12 +24,20 @@ function LoginPage() {
   const [password, setPassword] = useState("");
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
+  const [captchaToken, setCaptchaToken] = useState<string | null>(null);
+  const verify = useServerFn(verifyCaptcha);
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     setBusy(true);
     try {
       if (mode === "signup") {
+        if (TURNSTILE_ENABLED && !captchaToken) {
+          throw new Error("Please complete the captcha.");
+        }
+        if (TURNSTILE_ENABLED && captchaToken) {
+          await verify({ data: { token: captchaToken } });
+        }
         const { error } = await supabase.auth.signUp({
           email,
           password,
@@ -97,6 +108,7 @@ function LoginPage() {
           >
             {busy ? "Working…" : mode === "signin" ? "Sign in" : "Create account"}
           </button>
+          {mode === "signup" && <Turnstile onToken={setCaptchaToken} />}
         </form>
         <button
           onClick={() => setMode(mode === "signin" ? "signup" : "signin")}
