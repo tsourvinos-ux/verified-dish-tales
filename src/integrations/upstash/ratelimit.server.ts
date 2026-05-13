@@ -17,6 +17,34 @@ export type RateLimitOptions = {
 };
 
 /**
+ * Extract the caller's IP from a Cloudflare/Workers request.
+ * Prefers `CF-Connecting-IP` (set by Cloudflare on edge), falls back to the
+ * left-most `X-Forwarded-For` entry, then "unknown".
+ */
+export function getClientIp(request: Request): string {
+  const cf = request.headers.get("cf-connecting-ip");
+  if (cf) return cf.trim();
+  const xff = request.headers.get("x-forwarded-for");
+  if (xff) return xff.split(",")[0]?.trim() || "unknown";
+  return "unknown";
+}
+
+/**
+ * Convenience: enforce multiple keys atomically. Returns the first failure,
+ * or { ok: true } if all pass. Each key is checked sequentially — failures
+ * short-circuit. All checks fail-open on Upstash unavailability.
+ */
+export async function checkAll(
+  checks: ReadonlyArray<RateLimitOptions>,
+): Promise<RateLimitResult> {
+  for (const c of checks) {
+    const res = await checkRateLimit(c);
+    if (!res.ok) return res;
+  }
+  return { ok: true, remaining: Infinity as unknown as number, limit: Infinity as unknown as number };
+}
+
+/**
  * Fixed-window counter via Upstash REST pipeline (INCR + EXPIRE on first hit).
  * Two round-trips collapsed to one HTTP request.
  */
