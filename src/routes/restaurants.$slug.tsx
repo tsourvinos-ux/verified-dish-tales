@@ -1,10 +1,11 @@
 import { createFileRoute, Link, notFound } from "@tanstack/react-router";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState, useRef } from "react";
+import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
 import { useServerFn } from "@tanstack/react-start";
 import { submitReview, submitOwnerResponse } from "@/lib/ledger.functions";
+import { getBusinessLedger, type LedgerEntry } from "@/lib/ledger-read.functions";
 import { reviewFormSchema, responseFormSchema } from "@/lib/schemas";
 import { Nav } from "@/components/Nav";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -46,72 +47,47 @@ export const Route = createFileRoute("/restaurants/$slug")({
   ),
 });
 
-type Review = {
-  id: string;
-  user_id: string;
-  rating: number;
-  content: string;
-  created_at: string;
-  profile?: { display_name: string; is_verified: boolean } | null;
-  response?: {
-    id: string;
-    content: string;
-    created_at: string;
-    author?: { display_name: string } | null;
-  } | null;
-};
+type Review = LedgerEntry;
 
 function RestaurantPage() {
   const business = Route.useLoaderData();
   const { user, memberships } = useAuth();
   const queryClient = useQueryClient();
   const isOwner = memberships.includes(business.id);
+  const fetchLedger = useServerFn(getBusinessLedger);
 
   const reviewsKey = ["reviews", business.id] as const;
-  const { data: reviews, isLoading } = useQuery({
+  const {
+    data,
+    isLoading,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+  } = useInfiniteQuery({
     queryKey: reviewsKey,
-    queryFn: async (): Promise<Review[]> => {
-      const { data: rows, error } = await supabase
-        .from("reviews")
-        .select("id, user_id, rating, content, created_at")
-        .eq("business_id", business.id)
-        .order("created_at", { ascending: true });
-      if (error) throw error;
-      const ids = rows.map((r) => r.id);
-      const userIds = Array.from(new Set(rows.map((r) => r.user_id)));
-      const [{ data: profiles }, { data: responses }] = await Promise.all([
-        userIds.length
-          ? supabase
-              .from("profiles")
-              .select("id, display_name, is_verified")
-              .in("id", userIds)
-          : Promise.resolve({ data: [] as { id: string; display_name: string; is_verified: boolean }[] }),
-        ids.length
-          ? supabase
-              .from("owner_responses")
-              .select("id, review_id, content, created_at, author_id")
-              .in("review_id", ids)
-          : Promise.resolve({ data: [] as { id: string; review_id: string; content: string; created_at: string; author_id: string }[] }),
-      ]);
-      const profileMap = new Map((profiles ?? []).map((p) => [p.id, p]));
-      const respMap = new Map((responses ?? []).map((r) => [r.review_id, r]));
-      return rows.map((r) => {
-        const resp = respMap.get(r.id);
-        return {
-          ...r,
-          profile: profileMap.get(r.user_id) ?? null,
-          response: resp
-            ? {
-                id: resp.id,
-                content: resp.content,
-                created_at: resp.created_at,
-                author: profileMap.get(resp.author_id) ?? null,
-              }
-            : null,
-        };
-      });
-    },
+    initialPageParam: null as string | null,
+    queryFn: ({ pageParam }) =>
+      fetchLedger({ data: { business_id: business.id, cursor: pageParam } }),
+    getNextPageParam: (last) => last.nextCursor,
+    staleTime: 30_000,
   });
+
+  // Newest-first server response → oldest-first display so the conversation reads top-down.
+  const reviews: Review[] = (data?.pages.flatMap((p) => p.items) ?? []).slice().reverse();
+
+  // Intersection-observer sentinel for infinite scroll (loads OLDER entries).
+  const sentinelRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!sentinelRef.current || !hasNextPage) return;
+    const el = sentinelRef.current;
+    const io = new IntersectionObserver((entries) => {
+      if (entries[0]?.isIntersecting && !isFetchingNextPage) {
+        void fetchNextPage();
+      }
+    });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
 
   return (
     <div className="min-h-screen bg-cream">
@@ -132,17 +108,30 @@ function RestaurantPage() {
             ))}
           </div>
         ) : reviews && reviews.length > 0 ? (
-          <ul className="space-y-6">
-            {reviews.map((r) => (
-              <LedgerEntry
-                key={r.id}
-                review={r}
-                businessId={business.id}
-                canRespond={isOwner}
-                onResponded={() => queryClient.invalidateQueries({ queryKey: reviewsKey })}
-              />
-            ))}
-          </ul>
+          <>
+            {hasNextPage && (
+              <div ref={sentinelRef} className="flex justify-center py-2">
+                <button
+                  onClick={() => void fetchNextPage()}
+                  disabled={isFetchingNextPage}
+                  className="text-xs uppercase tracking-widest text-clay disabled:opacity-50"
+                >
+                  {isFetchingNextPage ? "Loading older…" : "Load older entries"}
+                </button>
+              </div>
+            )}
+            <ul className="space-y-6">
+              {reviews.map((r) => (
+                <LedgerEntry
+                  key={r.id}
+                  review={r}
+                  businessId={business.id}
+                  canRespond={isOwner}
+                  onResponded={() => queryClient.invalidateQueries({ queryKey: reviewsKey })}
+                />
+              ))}
+            </ul>
+          </>
         ) : (
           <p className="text-sm text-forest/60 italic">
             The ledger is empty. Be the first to write the record.

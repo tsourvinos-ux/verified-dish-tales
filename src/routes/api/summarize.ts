@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { createClient } from "@supabase/supabase-js";
 import type { Database } from "@/integrations/supabase/types";
 import { z } from "zod";
+import { checkRateLimit } from "@/integrations/upstash/ratelimit.server";
 
 const bodySchema = z.object({
   business_id: z.string().uuid(),
@@ -42,27 +43,11 @@ function cacheSet(key: string, text: string) {
   SUMMARY_CACHE.set(key, { text, expiresAt: Date.now() + SUMMARY_TTL_MS });
 }
 
-// @business-logic: per-user token-bucket rate limit. In-memory + best-effort
-// (single Worker isolate). Documented in docs/SECURITY.md "Known gaps".
-// 10 requests / 10 min, refilled linearly.
-const RATE_CAPACITY = 10;
-const RATE_WINDOW_MS = 10 * 60 * 1000;
-const RATE_LIMIT = new Map<string, { tokens: number; refilledAt: number }>();
-function rateLimitTake(userId: string): { ok: true } | { ok: false; retryAfterSec: number } {
-  const now = Date.now();
-  const entry = RATE_LIMIT.get(userId) ?? { tokens: RATE_CAPACITY, refilledAt: now };
-  const elapsed = now - entry.refilledAt;
-  const refill = (elapsed / RATE_WINDOW_MS) * RATE_CAPACITY;
-  const tokens = Math.min(RATE_CAPACITY, entry.tokens + refill);
-  if (tokens < 1) {
-    const needed = 1 - tokens;
-    const retryAfterSec = Math.ceil((needed / RATE_CAPACITY) * (RATE_WINDOW_MS / 1000));
-    RATE_LIMIT.set(userId, { tokens, refilledAt: now });
-    return { ok: false, retryAfterSec };
-  }
-  RATE_LIMIT.set(userId, { tokens: tokens - 1, refilledAt: now });
-  return { ok: true };
-}
+// @business-logic: per-user rate limit, distributed via Upstash Redis.
+// 10 requests per 10-minute fixed window. Fail-open on Upstash error
+// (availability over precision — see ratelimit.server.ts).
+const RATE_LIMIT_PER_WINDOW = 10;
+const RATE_WINDOW_SEC = 10 * 60;
 
 // @business-logic: Streams an AI summary of a business's ledger via Lovable AI Gateway.
 // Requires an authenticated patron and fetches reviews server-side (no client-supplied content
@@ -95,12 +80,18 @@ export const Route = createFileRoute("/api/summarize")({
           return new Response("Unauthorized", { status: 401 });
         }
 
-        const rl = rateLimitTake(String(claims.claims.sub));
+        const rl = await checkRateLimit({
+          key: `rl:summarize:${String(claims.claims.sub)}`,
+          limit: RATE_LIMIT_PER_WINDOW,
+          windowSec: RATE_WINDOW_SEC,
+        });
         if (!rl.ok) {
           return new Response("Rate limit exceeded. Try again later.", {
             status: 429,
             headers: {
               "Retry-After": String(rl.retryAfterSec),
+              "X-RateLimit-Limit": String(rl.limit),
+              "X-RateLimit-Remaining": "0",
               "Content-Type": "text/plain; charset=utf-8",
             },
           });

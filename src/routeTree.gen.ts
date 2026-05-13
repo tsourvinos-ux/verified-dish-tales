@@ -15,6 +15,7 @@ import { Route as AccountRouteImport } from './routes/account'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as RestaurantsSlugRouteImport } from './routes/restaurants.$slug'
 import { Route as ApiSummarizeRouteImport } from './routes/api/summarize'
+import { Route as AdminModerationRouteImport } from './routes/admin.moderation'
 
 const LoginRoute = LoginRouteImport.update({
   id: '/login',
@@ -46,20 +47,27 @@ const ApiSummarizeRoute = ApiSummarizeRouteImport.update({
   path: '/api/summarize',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AdminModerationRoute = AdminModerationRouteImport.update({
+  id: '/moderation',
+  path: '/moderation',
+  getParentRoute: () => AdminRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/account': typeof AccountRoute
-  '/admin': typeof AdminRoute
+  '/admin': typeof AdminRouteWithChildren
   '/login': typeof LoginRoute
+  '/admin/moderation': typeof AdminModerationRoute
   '/api/summarize': typeof ApiSummarizeRoute
   '/restaurants/$slug': typeof RestaurantsSlugRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/account': typeof AccountRoute
-  '/admin': typeof AdminRoute
+  '/admin': typeof AdminRouteWithChildren
   '/login': typeof LoginRoute
+  '/admin/moderation': typeof AdminModerationRoute
   '/api/summarize': typeof ApiSummarizeRoute
   '/restaurants/$slug': typeof RestaurantsSlugRoute
 }
@@ -67,8 +75,9 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/account': typeof AccountRoute
-  '/admin': typeof AdminRoute
+  '/admin': typeof AdminRouteWithChildren
   '/login': typeof LoginRoute
+  '/admin/moderation': typeof AdminModerationRoute
   '/api/summarize': typeof ApiSummarizeRoute
   '/restaurants/$slug': typeof RestaurantsSlugRoute
 }
@@ -79,6 +88,7 @@ export interface FileRouteTypes {
     | '/account'
     | '/admin'
     | '/login'
+    | '/admin/moderation'
     | '/api/summarize'
     | '/restaurants/$slug'
   fileRoutesByTo: FileRoutesByTo
@@ -87,6 +97,7 @@ export interface FileRouteTypes {
     | '/account'
     | '/admin'
     | '/login'
+    | '/admin/moderation'
     | '/api/summarize'
     | '/restaurants/$slug'
   id:
@@ -95,6 +106,7 @@ export interface FileRouteTypes {
     | '/account'
     | '/admin'
     | '/login'
+    | '/admin/moderation'
     | '/api/summarize'
     | '/restaurants/$slug'
   fileRoutesById: FileRoutesById
@@ -102,7 +114,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AccountRoute: typeof AccountRoute
-  AdminRoute: typeof AdminRoute
+  AdminRoute: typeof AdminRouteWithChildren
   LoginRoute: typeof LoginRoute
   ApiSummarizeRoute: typeof ApiSummarizeRoute
   RestaurantsSlugRoute: typeof RestaurantsSlugRoute
@@ -152,13 +164,30 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiSummarizeRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/admin/moderation': {
+      id: '/admin/moderation'
+      path: '/moderation'
+      fullPath: '/admin/moderation'
+      preLoaderRoute: typeof AdminModerationRouteImport
+      parentRoute: typeof AdminRoute
+    }
   }
 }
+
+interface AdminRouteChildren {
+  AdminModerationRoute: typeof AdminModerationRoute
+}
+
+const AdminRouteChildren: AdminRouteChildren = {
+  AdminModerationRoute: AdminModerationRoute,
+}
+
+const AdminRouteWithChildren = AdminRoute._addFileChildren(AdminRouteChildren)
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AccountRoute: AccountRoute,
-  AdminRoute: AdminRoute,
+  AdminRoute: AdminRouteWithChildren,
   LoginRoute: LoginRoute,
   ApiSummarizeRoute: ApiSummarizeRoute,
   RestaurantsSlugRoute: RestaurantsSlugRoute,

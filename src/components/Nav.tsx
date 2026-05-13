@@ -21,9 +21,14 @@ export function Nav() {
               Wallet
             </Link>
             {isAdmin && (
-              <Link to="/admin" className="text-clay" activeProps={{ className: "underline underline-offset-4" }}>
-                Admin
-              </Link>
+              <>
+                <Link to="/admin" className="text-clay" activeProps={{ className: "underline underline-offset-4" }}>
+                  Admin
+                </Link>
+                <Link to="/admin/moderation" className="text-clay/80 hidden sm:inline" activeProps={{ className: "underline underline-offset-4" }}>
+                  Moderation
+                </Link>
+              </>
             )}
             <button
               onClick={async () => {
