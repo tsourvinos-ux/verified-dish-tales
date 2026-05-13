@@ -122,13 +122,14 @@ function RestaurantPage() {
             )}
             <ul className="space-y-6">
               {reviews.map((r) => (
-                <LedgerEntry
-                  key={r.id}
-                  review={r}
-                  businessId={business.id}
-                  canRespond={isOwner}
-                  onResponded={() => queryClient.invalidateQueries({ queryKey: reviewsKey })}
-                />
+                <div key={r.id} id={`review-${r.id.slice(0, 8)}`}>
+                  <LedgerEntry
+                    review={r}
+                    businessId={business.id}
+                    canRespond={isOwner}
+                    onResponded={() => queryClient.invalidateQueries({ queryKey: reviewsKey })}
+                  />
+                </div>
               ))}
             </ul>
           </>
