@@ -1,6 +1,6 @@
 import { createFileRoute, Link, notFound } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState, useRef, useMemo } from "react";
+import { useState, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
 import { useServerFn } from "@tanstack/react-start";
@@ -407,20 +407,20 @@ function AISummaryPanel({
   business,
   reviews,
 }: {
-  business: { name: string };
+  business: { id: string; name: string };
   reviews: Review[];
 }) {
   const [text, setText] = useState("");
   const [streaming, setStreaming] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
-
-  const payload = useMemo(
-    () => reviews.map((r) => ({ rating: r.rating, content: r.content })),
-    [reviews]
-  );
+  const { session } = useAuth();
 
   async function run() {
     if (streaming) return;
+    if (!session) {
+      toast.error("Sign in to generate a summary.");
+      return;
+    }
     setText("");
     setStreaming(true);
     const ac = new AbortController();
@@ -428,8 +428,11 @@ function AISummaryPanel({
     try {
       const res = await fetch("/api/summarize", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: business.name, reviews: payload }),
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({ business_id: business.id }),
         signal: ac.signal,
       });
       if (!res.ok || !res.body) {
@@ -473,13 +476,17 @@ function AISummaryPanel({
           >
             <Square className="w-3 h-3 fill-clay" /> Stop
           </button>
-        ) : (
+        ) : session ? (
           <button
             onClick={run}
             className="text-xs uppercase tracking-widest bg-forest text-cream px-3 py-1.5 rounded-full"
           >
             {text ? "Regenerate" : "Generate"}
           </button>
+        ) : (
+          <span className="text-[11px] uppercase tracking-widest text-forest/50">
+            Sign in to generate
+          </span>
         )}
       </div>
       {text ? (
