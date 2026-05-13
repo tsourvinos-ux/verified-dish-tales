@@ -11,6 +11,8 @@
 | Staff identity | Enumeration via membership table | `business_profile_membership` SELECT restricted to self or admin |
 | AI summary | Prompt injection from review text | Server fetches reviews; sanitises angle-brackets/backticks; treats text as data in system prompt |
 | AI summary | Anonymous abuse / cost | `/api/summarize` requires Bearer token; rejected without valid Supabase claims |
+| AI summary | Cross-isolate spam | Per-user 10/10min rate limit via Upstash Redis (distributed, fail-open) |
+| Toxic / harmful content | Slips through into ledger | Pre-write moderation via Lovable AI; `is_visible=false` hides hidden rows from public reads via RLS |
 
 ## RLS matrix
 
